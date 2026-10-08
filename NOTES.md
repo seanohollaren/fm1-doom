@@ -603,4 +603,6 @@ item is a first-time-on-hardware unknown:
 Suggested first step on hardware, before any Doom data: install the Doom firmware **without** game data
 through the normal Felucca-style package (standard layout, standard loader). It would show the blue
 "no data" screen and prove boot, screen, USB update and the way back, without touching `0x93000+`.
-That package variant is not built yet (a 20-minute change to `pack.py`).
+That package now exists: `firmware/pack.py --no-data` → `firmware/build/doom_nodata.fwsc` (610,086 B),
+Felucca's exact layout with Felucca's own unmodified loader. VERIFIED with Felucca's own unmodified tests:
+its update entry accepts it, its loader installs it over Felucca, and Felucca installs back over it.

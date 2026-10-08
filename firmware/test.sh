@@ -14,5 +14,10 @@ run "extended loader: Felucca installed -> Doom package (code + game data)" $T/d
 run "extended loader: Doom installed -> Doom package again" $T/doom_ldr_test firmware/build/doom.fwsc firmware/build/doom.fwsc
 $CC -o $T/ldr_test Felucca/tests/ldr_test.c
 run "way back: Doom installed -> Felucca package with Felucca's own loader (Felucca's own test, unmodified)" $T/ldr_test firmware/build/doom.fwsc Felucca/build/felucca.fwsc
+if [ -f firmware/build/doom_nodata.fwsc ]; then
+  run "code-only package: Felucca's update entry accepts it (Felucca's own test, unmodified)" $T/ota_test firmware/build/doom_nodata.fwsc
+  run "code-only package: Felucca installed -> it, Felucca's own loader (Felucca's own test, unmodified)" $T/ldr_test Felucca/build/felucca.fwsc firmware/build/doom_nodata.fwsc
+  run "code-only package: it installed -> Felucca (Felucca's own test, unmodified)" $T/ldr_test firmware/build/doom_nodata.fwsc Felucca/build/felucca.fwsc
+fi
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

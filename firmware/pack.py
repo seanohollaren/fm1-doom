@@ -3,7 +3,10 @@
 """FM-1 Doom: make an installable package (firmware/build/doom.fwsc) from firmware/build/doom.elf's sections and a
 game data file (.whx). Uses Felucca's package tools (./Felucca/tools, GPL-3.0-only, (C) 2026 Leo Kuroshita).
 
-  firmware/pack.py DATA.whx
+  firmware/pack.py DATA.whx      ->  firmware/build/doom.fwsc          (code + game data, new layout, extended loader)
+  firmware/pack.py --no-data     ->  firmware/build/doom_nodata.fwsc   (code only: exactly Felucca's package layout and
+                                     Felucca's own unmodified loader; on the device it shows the blue "no data" screen
+                                     and stays updatable. Writes nothing above 0x93000. The cautious first install.)
 
 Two things differ from a Felucca package, and NEITHER HAS BEEN TRIED ON HARDWARE:
 
@@ -169,8 +172,22 @@ def checks(flash, whx, w, key):
 def main():
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
-    whx = Path(sys.argv[1]).read_bytes()
     app = app_image()
+    if sys.argv[1] == "--no-data":
+        ota = (FEL / "build" / "loader" / "ota.bin").read_bytes()     # Felucca's loader, as its own build made it
+        flash = pk.flash_image(app, pk.KEY)                           # Felucca's layout, unchanged
+        back = bytearray(flash)
+        pk.sfc(back, 0x4000, len(back) - 0x4000, 0x4000, pk.KEY)
+        w = sym("_whd_load") - 0x02000000 + 0x4000
+        if back[w:w + 4] == b"IWHX":
+            raise SystemExit("pack: there is game data where none was meant to be")
+        pkg = pk.ufw(flash, ota, "FM-1_900")
+        (OUT / "doom_nodata.fwsc").write_bytes(pkg)
+        print(f"  ok    no game data at {w:#x}: the firmware will show its blue 'no data' screen")
+        print(f"app      {len(app)} B in Felucca's standard {pk.APP_SLOT} B slot, Felucca's own loader ({len(ota)} B)")
+        print(f"package  {OUT / 'doom_nodata.fwsc'}  {len(pkg)} B   NOT TESTED ON HARDWARE - do not install without review")
+        return
+    whx = Path(sys.argv[1]).read_bytes()
     ota = doom_loader()
     flash, w, region = flash_image(app, whx, pk.KEY)
     notes = checks(flash, whx, w, pk.KEY)
