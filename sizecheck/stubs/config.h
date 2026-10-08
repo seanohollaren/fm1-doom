@@ -1,0 +1,7 @@
+#define PACKAGE_NAME "Doom"
+#define PACKAGE_TARNAME "doom"
+#define PACKAGE_VERSION "3.0.0"
+#define PACKAGE_STRING "Doom 3.0.0"
+#define PROGRAM_PREFIX "fm1-"
+#define HAVE_DECL_STRCASECMP 1
+#define HAVE_DECL_STRNCASECMP 1

@@ -1,0 +1,606 @@
+# FM-1 Doom — running notes
+
+Tags: **VERIFIED** = seen in code, build output or a repo's docs on this machine. **ASSUMED** = inferred or
+from memory, not yet confirmed. Nothing here was measured on my FM-1; "verified on hardware" claims are the
+upstream authors', and are tagged VERIFIED (upstream).
+
+Phase 0 ran 2026-10-07. The FM-1 was never connected, flashed or written.
+
+## Phase 0 verdict (short)
+
+**NO-GO for the plan as written** (doomgeneric + shareware `doom1.wad` in flash). Two hard limits:
+
+1. **Flash is 1 MiB in total.** The shareware WAD is ~4.2 MB; even rp2040-doom's most compressed form of it
+   (`doom1.whx`) is 1.80 MB. Neither fits, before any code.
+2. **RAM is 512 KB, no external RAM in use.** Stock doomgeneric wants a multi-megabyte zone heap.
+
+RAM alone is solvable (rp2040-doom runs in 264 KB). Flash is the blocker. Options are in "Go / no-go" below.
+
+## Environment (this Mac)
+
+- VERIFIED: macOS Darwin 24.6.0, arm64 (Apple silicon). Docker Desktop 29.8.2 running; the `docker` CLI is at
+  `~/.docker/bin/docker` and is **not on the default PATH** of non-login shells (prepend it).
+- VERIFIED: Felucca cloned at `./Felucca`, commit `276f72a` ("Felucca 1.1.5"). It is bare-metal: its own
+  `crt0.S`, linker script and HAL. It links **no** SDK code; the SDK only supplies three files for the package
+  (`uboot.boot`, `cfg_tool.bin`, `cfg/eq_cfg_hw.bin`).
+- Installed in Phase 0:
+  - `pip3 install Pillow fonttools` → fontTools 4.60.2 (Pillow 11.3.0 was already present), system Python 3.9.6
+  - JieLi toolchain via `tools/get_toolchain.sh` → `~/.jieli/toolchain` (`jieli-linux-toolchains-20250324.1`, 135 MB)
+  - AC79 SDK tag `AC79NN_SDK_V1.2.1_2023-12-13` → `~/fw-AC79_AIoT_SDK` (1.0 GB)
+  - `brew install fribidi` (1.0.17) — not in BUILDING.md, see next point
+  - Docker image `debian:bookworm-slim` (pulled by the build)
+  - Reference clones: `./FM-1-transporter`, `./doomgeneric`, `./rp2040-doom` (shallow)
+- Not installed: Emscripten (`emcc`) — needed for the browser emulator in Phase 2. Node 22 is present.
+
+### Build gotcha on this Mac (VERIFIED)
+
+`./build.sh` fails in `gen_aa_font.py` with `KeyError: ... not supported without libraqm`. Cause: Pillow's
+wheel needs FriBiDi at runtime for Raqm text layout; macOS has none, and after `brew install fribidi` the
+library is in `/opt/homebrew/lib`, which Apple's Python does not search. `DYLD_FALLBACK_LIBRARY_PATH` fixes
+that, but macOS strips `DYLD_*` variables when passing through `/bin/sh` and `/usr/bin/python3`, so
+`build.sh` (a `/bin/sh` script) cannot carry it. Working command, equivalent to `build.sh`:
+
+```bash
+export PATH="$HOME/.docker/bin:$PATH"
+cd Felucca && JIELI_TOOLCHAIN=$HOME/.jieli/toolchain AC79_SDK=$HOME/fw-AC79_AIoT_SDK \
+  DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+  /Library/Developer/CommandLineTools/usr/bin/python3 tools/build.py
+```
+
+No Felucca source was modified (`git status` clean).
+
+### Build and test results (VERIFIED)
+
+- Build OK: `felucca.bin` 447,568 B, `loader/ota.bin` 6,930 B, `felucca.fwsc` 610,086 B, identity `FM-1_900`
+  (sha256 `ece5dc7a…d63e`). Build self-checks passed (`.ram_text` has no calls, register access only in `hal/`).
+- `tests/run_tests.sh`: 76 suites ran. All passed **except** `text spacing`, which failed for the same Raqm
+  reason (the script runs `python3` through `sh`). Re-run on its own with the library path set, it passes.
+  The script therefore printed `HOST TESTS FAILED` / exit 1; I count that as an environment failure, not a
+  Felucca failure. Browser-emulator tests were skipped (no `emcc`).
+
+## Hardware answers
+
+### SoC and CPU
+
+- VERIFIED: JieLi AC791N (WL82), pi32v2 architecture. Package chip id `AC791N`; ROM UBOOT reports vendor `WL82`.
+- ASSUMED: exact package/variant unknown. Nothing in Felucca or Transporter names it.
+- ASSUMED: **CPU clock unknown.** Felucca never touches the PLL or system clock; it runs at whatever the SPL
+  sets from the `isd_config` in the device's own flash head. The SDK's default is `SYS_CLK=320MHz`, but that
+  is the SDK's default, not the FM-1's. One hint: `lcd.c` says SPI1 `lsb/(BAUD+1)`, `4 = 12 MHz`, so the
+  low-speed bus is 60 MHz (VERIFIED as a comment only). Measure in Phase 2 with a timed loop against TIMER4.
+- ASSUMED: FPU present per public specs. Felucca's DSP is all fixed point and it builds with plain `-Os`.
+- VERIFIED: Felucca uses one core only (no second-core bring-up anywhere).
+
+### RAM
+
+- VERIFIED: internal SRAM is `0x01C00000–0x01C80000` = **512 KB**. The SDK's linker script agrees
+  (`ram0` ends at `0x1C7FE00`). The "~578 KB" in the brief is not what is addressable here.
+- Felucca's map (`firmware/app.ld`):
+
+  | Range | Size | Use |
+  | --- | --- | --- |
+  | `0x01C00000–0x01C06000` | 24 KB | `.ram_text`: flash driver code that must run while XIP is off (2.9 KB used) |
+  | `0x01C06000–0x01C08000` | 8 KB | reserved for RAM-run debug |
+  | `0x01C08000–0x01C20000` | 96 KB | `.data` + `.bss` (91,220 B used) |
+  | `0x01C20000–0x01C74000` | 336 KB | `.pool`: big zeroed buffers (331,204 B used) |
+  | `0x01C74000–0x01C7C000` | 32 KB | user stack 24 KB + supervisor stack 8 KB, 256 B guard bands |
+  | `0x01C7C000–0x01C7FD50` | 15.7 KB | `.noinit` (crash record, debug counters; survives reset) |
+  | `0x01C7FD50–0x01C80000` | 0.7 KB | boot info, boot-state mailbox, vector table (write-protected) |
+
+- VERIFIED: **Felucca leaves almost nothing free** (about 7 KB of RAM, 13 KB of pool). That is the synth
+  (FX delay lines, voices, canvases), not the HAL.
+- ASSUMED: with the synth removed, the HAL + USB + LCD + audio need roughly 10–20 KB, leaving **~450–480 KB**
+  for a new program. To confirm in Phase 2 from the test program's map file.
+- PSRAM / SDRAM: VERIFIED that Felucca uses none. The SDK maps SDRAM at `0x04000120` on AC791N variants that
+  have it. Whether the FM-1's chip has any is **ASSUMED no** (Felucca squeezing into 512 KB suggests it).
+  Could be probed later with a read-only RAM-run through UBOOT, with approval.
+
+### Flash
+
+- VERIFIED: **1 MiB SPI NOR**, JEDEC id `0x856014`. Chip key `0x980F`.
+- VERIFIED: **memory-mapped (XIP)** through the SFC with an instruction/data cache. Flash offset `off`
+  (>= 0x4000) reads at `0x02000000 + off - 0x4000`. The app runs in place from `0x02000120`. Constant data
+  can stay in flash, as hoped.
+- VERIFIED: the app area is stored encrypted (SFC cipher, per 32-byte block) and decrypted on read; Felucca
+  maps everything from `0x93000` up as a plain (unencrypted) window.
+- VERIFIED layout:
+
+  | Flash range | Size | Contents |
+  | --- | --- | --- |
+  | `0x00000–0x04000` | 16 KB | flash header, SPL (`uboot.boot`), `isd_config` — never written by any tool |
+  | `0x04000–0x93000` | 585,728 B | application. Max app image 581,564 B (`0x8DFBC`). Felucca uses 447,568 B |
+  | `0x93000–0x97000` | 16 KB | unused gap / update records |
+  | `0x97000–0xE0000` | 299,008 B | Felucca's store (projects, user samples). Stock uses this region for VM/BTIF/user data |
+  | `0xE0000–0xE7000` | 28 KB | update-loader staging + autosave |
+  | `0xFC000–0xFF000` | 12 KB | Felucca superblock / settings |
+
+- VERIFIED: runtime erase/program works by switching XIP off and bit-driving SPI0 from RAM code with
+  interrupts off (4 KB erase up to ~400 ms, audio stops meanwhile).
+- VERIFIED: the installer path (update loader) and FM-1 Transporter both write **only** `0x4000–0x93000`.
+  Anything placed above that has to be written by the running app itself (as Felucca does for samples).
+
+### Display
+
+- VERIFIED: ST7789-class **240x240** IPS panel, **RGB565**, 4-wire SPI on SPI1 (PC9 CLK, PC10 DO, PC7 CS,
+  PC8 D/C), backlight PA2 active low. Write-only (no MISO, no tearing signal).
+- VERIFIED: SPI clock 12 MHz (`LCD_BAUD 4`). Pixels go out by **DMA from a RAM buffer** (the source must be
+  in RAM, not XIP), big-endian byte order. Transfers are polled, not interrupt-driven; the last one is left
+  running while the main loop continues.
+- VERIFIED: Felucca has no full framebuffer. It draws into a strip canvas (max 240x124) and blits strips.
+- Derived: at 12 MHz a full 240x240 frame takes 77 ms (**13 fps ceiling**). A 240x150 Doom view (320x200
+  scaled 3:4) takes 48 ms (~20 fps ceiling). ASSUMED: a lower BAUD divisor (20–30 MHz) works; the ST7789
+  allows it, but nobody has tested it on this board.
+
+### Keys, buttons, encoders
+
+- VERIFIED: one 11-column x 6-row diode matrix behind two 74HC595 shift registers (PA4 SER, PA3 SRCLK,
+  PA1 RCLK); rows on PA0, PA5–PA8, PB7. No ghosting. 41 switches: ids 0–13 buttons, 14–40 the 27 note keys
+  (F3–G5). 7 encoders are read through the same matrix (quadrature, one step per detent).
+- VERIFIED: scanned from the TIMER5 interrupt at 10 kHz, one column per tick (full frame 1.1 ms), debounced
+  in the ISR. The app reads `fm1_in.notes` / `fm1_in.buttons` bitmasks and `fm1_enc_take()`.
+- VERIFIED: the same columns drive the key LEDs. Master volume pot and battery are on the SAR ADC (PB6, PB1).
+- VERIFIED: button labels: FX, SCL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC, OCT-, OCT+.
+  Encoders: SELECT, ALGORITHM, PRESETS, KNOB 1–4.
+- Note: OCT- + OCT+ held 5 s enters UBOOT in Felucca. A Doom build should keep that escape hatch.
+
+### Audio
+
+- VERIFIED: I2S (ALNK0) to an external codec (control lines PC0/1/2/6), then speaker/headphones. Stereo,
+  24-bit left-justified in 32-bit words, **44.1 kHz** (44,117.6 Hz actual).
+- VERIFIED: double-buffered DMA; an interrupt per half buffer (128 frames = 2.9 ms) asks the app to fill
+  the free half. Doom SFX mixing drops straight into that callback.
+- VERIFIED: USB audio and USB MIDI are separate features of Felucca's USB driver and can be compiled out.
+
+### Timers
+
+- VERIFIED: TIMER4 free-runs at 24 MHz from the crystal (32-bit, wraps every 178.9 s): `fm1_ticks()`,
+  `fm1_micros()`, busy-wait delays.
+- VERIFIED: TIMER5 is the 10 kHz system tick: input scan, USB poll (2 kHz), and the millisecond counter
+  `fm1_ms`. It has higher priority than audio and nests inside the audio interrupt.
+- No RTOS, no sleep: Doom's `DG_SleepMs` would be a busy wait on `fm1_ms`; `DG_GetTicksMs` is `fm1_ms`.
+
+### Boot and update flow
+
+- VERIFIED: chain is mask ROM → SPL (`uboot.boot` in the flash head) → app. The SPL maps the app at
+  `0x02000120` and jumps to its first byte.
+- VERIFIED: the SPL runs the update loader instead when it finds a valid update record (`UPDATA_PARM`,
+  112 bytes) in RAM at `0x01C7FD88` after a warm reset, or in flash at a "4 KB boundary minus 256" position
+  between `0x93000` and `0xFC000` after a power cycle. It then loads `usb_hid_ota.bin` from the staging
+  area to RAM `0x01C0A800` and runs it.
+- VERIFIED install sequence: host sends an "upgrade" SysEx → the app pulls the package over USB MIDI,
+  stages the loader at `0xE0000`, writes the record, resets → the loader (RAM only, own USB MIDI device
+  "Felucca Update") checks the package decrypts with this chip's key and matches its CRC **before erasing
+  anything**, then writes only differing 4 KB sectors of the app area, verifies each, clears the record
+  and resets. Power loss mid-write: the flash record survives, the loader runs again and the host resumes.
+- VERIFIED: the app arms the watchdog (~8 s) as its very first action. A boot guard counts boots that die
+  within 30 s; after two in a row the app jumps to ROM UBOOT by itself (`WL80UBOOT`, `4C4A:8057`).
+  SysEx `F0 22 24 35 7D F7` also enters UBOOT. Any firmware we build on this HAL inherits all three.
+- VERIFIED: hardware guards (stack limits, write-protected vector area, PC limit to the app's text, bus
+  faults) end in a crash screen and reset.
+
+## Recovery: FM-1 Transporter (read fully)
+
+What it is (VERIFIED from its README and docs; hardware results are upstream's, dated 2026-10-01):
+
+- Firmware for a **Seeed XIAO RP2040** that acts as a USB host to the FM-1 and talks to the chip's mask-ROM
+  bootloader. The Mac drives it with `tools/fm1t.py` (needs `pyserial`). MIT licensed.
+- **Wiring: three wires only** — XIAO D6 (GP0) → FM-1 USB D+, D7 (GP1) → D-, GND → GND. **Never connect
+  VBUS/5 V**; the FM-1 runs on its battery. This means cutting open a USB cable or using a USB-C breakout.
+  Only the XIAO RP2040 is confirmed; the Waveshare RP2350-USB-A is known not to work.
+- Building it needs pico-sdk 2.2.0, ARM GCC, CMake, picotool, and `wl82loader.bin` from jl-uboot-tool
+  (not included in the repo). None of this is installed yet.
+
+Procedure:
+
+1. Wire up, flash the XIAO with `fm1_transporter.uf2`.
+2. Get the FM-1 into ROM UBOOT. Three ways: (a) running firmware accepts the USB-MIDI soft key (stock V15
+   and Felucca both do; `fm1t.py` sends it itself); (b) for a dead unit, connect the XIAO first, then
+   switch the FM-1 on — the XIAO sends a "USB_KEY" pattern at power-on that the ROM listens for;
+   (c) after a watchdog reset the ROM also accepts the key (`fm1t.py rekey`), no power cycle needed.
+3. `fm1t.py info` — expect key `980F`, flash id `856014`.
+4. `fm1t.py dump backup.bin` — full 1 MiB in about 3 s. **This is the backup to take before Phase 1.**
+5. `fm1t.py write --package FM-1_vNN.fwsc --ref backup.bin` — a dry run unless `--write` is added. It
+   requires a fresh read to match `--ref`, writes only differing sectors in `0x4000–0x93000`, reads each
+   back, then does a final full compare.
+6. Power-cycle the FM-1 afterwards to get normal USB back.
+
+Limits that matter to us:
+
+- It can only write the app area. It cannot repair the flash head (SPL, `isd_config`), and it does not
+  restore anything above `0x93000`. Neither does any tool we have. So: **never write below `0x4000`**.
+- `write` refuses packages that are not stock V15 or do not carry a "PASSED" review manifest from the
+  author's research tooling (`fm-1-research-lab`, which I have not seen). ASSUMED: a custom Doom package
+  would need that check satisfied or bypassed. For recovery we only ever need to write **stock** firmware,
+  which is accepted, so this does not weaken the recovery path.
+- The ROM drops back to booting flash when the host disconnects, so dump, compare and write happen in one
+  session.
+- There is no USB-only hard reset; a truly hung unit with no watchdog needs one power-off/on.
+
+## Licences (VERIFIED from the files)
+
+- Felucca: GPL-3.0-only. Its ported parts are MIT / Apache-2.0. SDK files in the package: Apache-2.0.
+- doomgeneric: `LICENSE` is GPL v2; 177 source files carry "version 2 … or (at your option) any later
+  version". The few files without that header are doomgeneric's own platform shims, which we would not use.
+- rp2040-doom: Chocolate-Doom-derived code is GPL-2.0-or-later (checked in `d_main.c`); its new code is
+  BSD-3; emu8950 is MIT.
+- Conclusion: a combined work under GPL-3 is fine with either Doom base. Per-file headers should be
+  re-checked for whatever subset we actually compile.
+- WADs: shareware `doom1.wad` may be used but not redistributed in modified form; Freedoom is BSD-style
+  and can be cut down and redistributed. ASSUMED from memory, check before publishing anything.
+
+## Go / no-go: Doom's memory against what exists
+
+| Need | Size | Available | Fits? |
+| --- | --- | --- | --- |
+| `doom1.wad` (shareware, v1.9) | ~4.2 MB (ASSUMED, not downloaded) | 1 MiB flash total | No, 4x over |
+| `doom1.whx` (rp2040-doom's compressed shareware) | 1,800,344 B (VERIFIED, file in repo) | ≤ ~1.0 MB even using every writable byte | No, 1.8x over |
+| Doom engine code + tables in flash | ASSUMED 300–400 KB on pi32v2 | 581 KB app slot | Yes |
+| RAM, stock doomgeneric | several MB (default zone 6 MB) | ~450–480 KB | No |
+| RAM, rp2040-doom approach | designed for 264 KB total | ~450–480 KB | Yes, with margin |
+| Framebuffer 240x150 RGB565 | 72 KB (or 36 KB 8-bit + strip conversion) | from the above | Yes |
+
+Realistic storage on an unmodified FM-1: 581 KB (app slot, installable and recoverable) plus ~299–430 KB
+above it (only writable by our own running code, and it overwrites the synth's stored data).
+
+### Ways forward, best first
+
+1. **Cut-down game data ("E1M1 only").** Build a reduced data file holding one level and only the textures,
+   sprites and sounds it uses, in rp2040-doom's compressed format, on rp2040-doom's engine. Target: engine
+   in the app slot, data in the ~300–430 KB above it or, if small enough, all inside the 581 KB slot.
+   ASSUMED feasible; nobody has published sizes for a single-level WHX, so the first task would be to
+   measure it on the Mac with `whd_gen` before writing any firmware. Matches the brief's first target
+   ("E1M1 title screen, then gameplay") but not full shareware Doom.
+2. **Replace the flash chip** with a pin-compatible 4–16 MB SPI NOR. Makes full shareware Doom possible.
+   Needs fine soldering and re-creating the flash head, which no current tool writes; a mistake there is
+   not recoverable with Transporter. High risk.
+3. **Host-tethered data over USB.** Serve WAD data from the Mac. Too slow and too RAM-hungry to be playable.
+   Not recommended.
+
+### Main risks
+
+- **Flash size** (above). Decides the whole project.
+- **Engine choice changes.** Phase 3 as written (doomgeneric) does not fit in RAM. The port has to start
+  from rp2040-doom, which is far more intricate code and is tied to its own data format.
+- **CPU speed is unknown.** rp2040-doom needs a 270 MHz dual-core overclock for 30+ fps and does not use an
+  FPU. One pi32v2 core at an unknown clock, executing from cached SPI flash, may be much slower.
+- **Display throughput**: 13–20 fps ceiling at the current SPI clock, before any rendering cost.
+- **Flash cache misses**: all code and data run through a small XIP cache; hot loops may need to live in
+  RAM (`.ram_text` exists for this, 24 KB).
+- **Data above `0x93000` is outside every safety net** — the installer and Transporter never write it, so
+  a Doom build must upload its own data, and doing so erases Felucca/stock presets stored there.
+- **Recovery hardware is not on hand yet** (XIAO RP2040, cut cable, pico-sdk toolchain, `wl82loader.bin`),
+  and a custom package may be refused by `fm1t.py write`'s review check (irrelevant for restoring stock).
+- **Build fragility on this Mac**: the Raqm/FriBiDi workaround above is needed for every build.
+
+## Open questions for later phases
+
+- Actual CPU clock, and whether the second core and FPU are usable from bare metal.
+- Size of a single-level WHX (measure on the Mac first).
+- Whether the LCD runs reliably above 12 MHz.
+- Whether the region `0x93000–0x97000` and `0xE7000–0xFC000` is truly free on a stock unit.
+- Whether M-VAVE's official `FM-1.fwsc` (V15) is downloaded and its hash matches what Transporter expects.
+
+## 2026-10-07 — Single-level data size (Mac only, no device)
+
+Direction chosen by Sean: MVP = shareware E1M1 only, full colour, sound, controls, reasonable frame rate.
+
+- VERIFIED: shareware `doom1.wad` v1.9 downloaded to `wads/doom1.wad` (4,196,020 B, MD5
+  `f0cefca49926d00903cf57551d901abe`). Two mirrors failed first (ibiblio 404, Doomworld 403); a GitHub
+  mirror worked and the checksum matches v1.9. Do not commit or redistribute it or anything cut from it.
+- Installed: `brew install cmake sdl2 sdl2_mixer sdl2_net` (Homebrew supplied sdl2-compat/SDL3 and audio
+  codec dependencies). rp2040-doom's CMake still could not find SDL2, so `whd_gen` was compiled by hand
+  (it needs no SDL): its six `.cpp` files plus `tiny_huff.c`, `musx_decoder.c`, `image_decoder.c`,
+  `adpcm-xq/adpcm-lib.c`, with `-DIS_WHD_GEN=1 -DNDEBUG -Wno-missing-template-arg-list-after-template-kw`.
+  Check: it converts the full WAD to 1,800,312 B (repo's copy is 1,800,344 B).
+- `tools/cut_wad.py SRC DST LEVEL` writes a cut-down WAD; `tools/wad_stats.py` prints sizes by category.
+- VERIFIED sizes after `whd_gen` (WHX format):
+
+  | Cut | WHX size |
+  | --- | --- |
+  | Full shareware WAD | 1,800,312 B |
+  | 1: E1M1 only, its sprites, one music track | 1,210,540 B |
+  | 2: + only E1M1's wall textures and flats | 1,022,372 B |
+  | 3: + only E1M1's sound effects, no multiplayer sprites, no help/credit/intermission-map screens | 714,332 B |
+  | 4: + no title picture | 677,308 B |
+
+  Cut 3 breakdown: walls + sprites 344 KB, sound effects 169 KB, status bar / fonts / menu art 113 KB,
+  flats 28 KB, level 16 KB, music 7 KB, misc 11 KB.
+- ASSUMED further savings: ~50 KB from unused menu/intermission art, ~80 KB from halving the sound-effect
+  sample rate. A floor of roughly 550 KB looks reachable without touching the level itself.
+- NOT YET TESTED: whether rp2040-doom's engine runs a WHX with lumps missing. `whd_gen` accepted the cut
+  WADs, but the engine has hard references (other maps' names, intermission, demos) that need stubbing.
+- Budget: 581,564 B app slot + 299,008 B (Felucca's store) = 880 KB conservatively; up to ~1,011 KB if
+  everything from `0x93000` to `0xFC000` is used. With 680–715 KB of data that leaves **165–330 KB for
+  the engine**, or 330–460 KB if data is trimmed to ~550 KB.
+- ASSUMED: engine code is 250–350 KB. This is now the deciding unknown, and it can be measured without
+  the device by compiling rp2040-doom's engine sources with the JieLi compiler.
+- Data will not fit in the app slot alongside the code, so part of it must live above `0x93000`, where
+  only our own running firmware can write it.
+
+## 2026-10-07 — Engine code size on the FM-1's CPU (Mac only, no device)
+
+MVP confirmed by Sean: E1M1, single player only, title screen → gameplay if possible, the E1M1 music track
+if possible. Both title and music may be deferred if they threaten the fit.
+
+- VERIFIED: rp2040-doom's published `doom_tiny.uf2` is 522,240 B, i.e. ~255 KB of ARM Thumb code and
+  tables (its WAD sits at a 256 KB offset). That is the reference point.
+- VERIFIED: all 98 engine source files of the `doom_tiny` build compile with the JieLi pi32v2 compiler at
+  `-Os` (objects only, not linked). Setup is in `sizecheck/` (`run.sh` runs in Docker, `totals.py` sums):
+  **text 157,954 + rodata 99,953 + data 1,917 = 259,824 B of flash**; static RAM 72.9 KB (62.7 KB of it the
+  renderer's buffers).
+- What that number leaves out: the platform layer (video, input, sound, timer, main — rp2040-doom's
+  `src/pico/*` and `opl_pico.c` were excluded because they are RP2040-specific and get rewritten), Felucca's
+  HAL/USB/update entry, and libc. ASSUMED 30–40 KB together. It also has no linker dead-code removal, which
+  will take some back.
+- VERIFIED breakdown: music (OPL emulator + player) is 19.7 KB of code. Removable for an MVP: savegames
+  13.5 KB, AES/SHA 16.6 KB, intermission 5.6 KB, automap 5.9 KB, net stubs ~2 KB — about 45 KB.
+- Changes needed just to compile, committed on branch `fm1-port` in `./rp2040-doom` (2 files): Thumb
+  inline assembly in `m_fixed.h` and a breakpoint in `doomtype.h` guarded by `__arm__`; short-pointer
+  base made overridable. Stand-ins used only for the size check (`sizecheck/stubs/`): a tiny C++
+  `<algorithm>/<set>/<atomic>` (the JieLi toolchain ships **no C++ standard library**), and a fake RP2040
+  "interpolator" header.
+- Porting facts learned (VERIFIED in source):
+  - The code uses `PICO_ON_DEVICE` to mean both "small-memory layout" (needed) and "RP2040 hardware"
+    (not available). These have to be separated file by file.
+  - The renderer (`pd_render.cpp`) and the OPL slot renderer use the RP2040's hardware interpolator and
+    ARM assembly fast paths. Both have plain-C fallbacks (slower).
+  - Objects are addressed by 16-bit "short pointers" that reach only 256 KB above a base address; the
+    game heap must sit inside one 256 KB window of our RAM.
+  - It is written for two cores (render on one, game/sound on the other). Felucca uses one.
+- Data, corrected: my cut 3 had dropped `GENMIDI` (the music instrument table). Kept now:
+
+  | Cut | WHX size |
+  | --- | --- |
+  | 3: E1M1, title picture, E1M1 music + instruments | 726,256 B |
+  | 5: as 3 but no intermission art and no title picture | 653,964 B |
+  | 5 + title picture (~37 KB) | ~691 KB (derived) |
+
+### Fit, with title screen and music
+
+| Item | Size |
+| --- | --- |
+| Data: cut 5 + title | ~691 KB |
+| Engine as compiled | 260 KB |
+| Platform + HAL + libc (ASSUMED) | 30–40 KB |
+| **Total** | **~985 KB** |
+| Conservative ceiling (app slot + Felucca's store) | 880 KB |
+| Stretch ceiling (everything `0x4000–0xFC000`) | ~1,011 KB |
+
+It fits the stretch ceiling as is, with ~25 KB spare. To fit the conservative ceiling: drop savegames,
+crypto, intermission, automap (−45 KB, VERIFIED sizes) and halve the sound-effect sample rate (ASSUMED
+−85 KB) → ~855 KB. **Go, but tight**; title and music together cost ~65 KB and are the first things to
+defer if needed.
+
+### Safety plan for when the device is connected (nothing done yet)
+
+- Baud Girl's FM-1+VA installer (`baudgirl.com/work/FM-1+VA/install`) is a second third-party firmware
+  installed by the same browser/USB-MIDI route as Felucca, and states that saved presets and patterns are
+  not overwritten. VERIFIED only that the page says so; it supports the view that the app-area install
+  path is routine. I did not go past the first page.
+- Order of operations I intend to propose, each write needing a yes:
+  1. Transporter built and wired; `fm1t.py info` then two full dumps that must be identical (read-only on
+     the flash, but it does run a loader in the FM-1's RAM, so I will ask first).
+  2. Have M-VAVE's stock `FM-1.fwsc` downloaded and checked.
+  3. Install stock Felucca by the normal route (Phase 1) and prove a round trip back to stock.
+  4. Only then our own builds, which keep Felucca's boot code unchanged: watchdog first, boot guard
+     (two bad boots → ROM boot mode), OCT- + OCT+ hold, the USB "enter boot mode" message, and the update
+     entry. A broken game then still leaves a device that can be re-installed over USB.
+  5. Never write below `0x4000`. Game data above `0x93000` goes only into `0x97000–0xE0000`, the range
+     Felucca already uses, written by our own firmware with verify.
+- Known gap: no existing tool restores the region above `0x93000`. The full dump from step 1 is the only
+  copy; putting it back would need our own writer. ASSUMED stock re-creates its settings there if blank.
+
+## 2026-10-07 — Device-free steps 1–3 (Mac only)
+
+Decisions from Sean: drop savegames, automap and the end-of-level stats screen; keep sound effects at
+full quality unless the image does not fit. Emscripten install and local-branch edits approved.
+
+Installed: `brew update`, then `emscripten` 6.0.10 (1 GB), `pkgconf`, `sdl2_image` (plus image-codec
+dependencies). Cloned `./pico-host-sdl`.
+
+### Step 1 — the cut-down data really plays (VERIFIED)
+
+- rp2040-doom's host build (`doom_tiny`, `PICO_PLATFORM=host` + pico-host-sdl) builds in `./host-build`.
+  Needed on Apple silicon: `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` and C/C++ flags
+  `-D__sev=host_sev -D__wfe=host_wfe -D__wfi=host_wfi` (Apple clang treats those names as builtins).
+  The data is embedded via `./cup.sh file.whx` → `src/tiny.whd.h` (git-excluded: it is WAD data).
+- Test hooks (host builds only), committed on `fm1-port`: `FM1_AUTOSTART=1` starts E1M1 directly,
+  `FM1_AUTOPLAY=1` walks/turns/fires on a script and logs player state. Uncommitted local edit in
+  `pico-host-sdl/sdl_video.c`: `FM1_SHOT_DIR=dir` dumps a raw frame every 2 s; `tools/shot2png.py`
+  converts. Run headless with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`.
+- Result with cut 3 (726 KB, the other 8 maps, demos, help/credit screens, unused sounds/sprites all
+  missing): 45 s of scripted play with no crash or missing-lump error. Screenshots show walls, floors,
+  status bar, HUD message font, weapon, muzzle flash, a barrel explosion, an item pickup, enemy sprites
+  and the death view. Ammo fell 50 → 21 and the player died at about tic 800, so input, shooting, damage
+  and death all ran. Game logic ticks at 35 Hz.
+- NOT tested: the title screen → new game menu path, level exit (needs the intermission stubbed since
+  its art is cut), sound output (audio driver was the dummy one), and cut 5.
+
+### Step 2 — linked image size (VERIFIED)
+
+- `sizecheck/link.sh` links the 98 engine objects with the toolchain's libc/compiler-rt, dead-code
+  removal on, and empty stubs for the 80 symbols the unwritten platform layer must provide
+  (`I_*` video/timer/input, semaphores, `printf` family, `malloc`, the network lobby, flash save).
+- Result: **`.text` + constants 222,420 B, `.data` 2,164 B → 224.6 KB of flash** (was 260 KB unlinked).
+  Static RAM `.bss` 81.6 KB; plus the 256 KB game heap → about 340 KB of the 512 KB, before stacks and
+  the platform layer.
+- The JieLi libc has no `printf`/`malloc` (they showed up as unresolved); a small `printf` and the
+  engine's own zone allocator will cover them.
+- Updated fit: data 691 KB (cut 5 + title) + engine 225 KB + platform/HAL (ASSUMED 30–40 KB) ≈ 950 KB.
+  After dropping savegames/automap/intermission code: roughly 915–925 KB. That is over the 880 KB
+  conservative ceiling by ~40 KB and under the ~1,011 KB stretch ceiling. With full-quality sound the
+  build needs either some of the stretch area (`0x93000–0x97000`, `0xE7000–0xFC000`) or ~40 KB more
+  trimming.
+
+### Step 3 — browser emulator
+
+- VERIFIED: stock Felucca's emulator builds with Emscripten (`web/emu/build.sh` → `build/emu/felucca.wasm`,
+  650,446 B) and runs in a browser from `python3 -m http.server -d build/emu 8790`: the synth's home
+  screen draws on the emulated display with no console errors. A preview entry `fm1-emu` was added to
+  `/Users/sean/code/.claude/launch.json`.
+
+## 2026-10-07 — Step 3 done: the game runs in a browser model of the FM-1 panel (Mac only)
+
+- VERIFIED: `web/build.sh` compiles rp2040-doom's engine plus a new FM-1 platform layer
+  (`rp2040-doom/src/fm1/`, branch `fm1-port`) to WebAssembly: `web/build/doom.{js,wasm}` + `index.html`.
+  Serve with `python3 -m http.server -d web/build 8791` (preview entry `fm1-doom`). In the browser:
+  title screen → menu → New Game → skill → E1M1, walking and turning, at 35–36 fps. That frame rate is the
+  Mac's and says nothing about the FM-1's CPU.
+- It is 32-bit and uses the device's small-memory layout (`PICO_ON_DEVICE=1` + `FM1=1`), so it is the
+  closest thing to the firmware that can run without hardware. It is our own page with a 240x240 canvas,
+  not Felucca's emulator page; both model the panel at the same level (`lcd_blit` into a 240x240 RGB565
+  buffer), so the platform layer's `fm1_lcd_blit` maps straight onto Felucca's `lcd_blit` on the device.
+- How video works (VERIFIED in code): the engine keeps two 8-bit 320x168 frame buffers (107 KB) and
+  composes each of the 200 output lines on the fly (palette lookup, then status bar / menu / HUD patches).
+  `fm1_video.c` reuses that code unchanged, squeezes each line 320 → 240 (outer pixels kept, middle two
+  averaged), drops every 4th line (200 → 150) and sends 10-line strips (4.8 KB) to the panel, centred
+  with black bars above and below. No full-colour frame buffer is needed.
+- One CPU core (VERIFIED): the renderer already shares its work between cores by taking jobs from a
+  common list, so core 0 alone draws everything. The semaphores it would block on now run the "other
+  core's" job inline (`fm1_platform.c`): show the finished frame, or acknowledge.
+- `FM1=1` changes in the engine: no RP2040 interpolator, run-time short-pointer base, WAD address from
+  the platform, title screen waits for a key instead of cycling demos/credits, flash savegames stubbed.
+- Short pointers (VERIFIED the hard way): they point at some of the engine's static variables as well as
+  the heap (`thinkercap` trapped first). So the 256 KB window must cover those statics *and* the heap.
+  Total statics are ~199 KB; of that the frame buffers (107 KB) and renderer work areas (63 KB) seem not
+  to be short-pointed, and with those placed below the window the browser build runs with a 200 KB heap.
+  The firmware's linker script has to arrange RAM the same way. ASSUMED: nothing else outside the window
+  is short-pointed — only E1M1's start area has been exercised so far.
+- Data: the title music the OPL player wants is `D_INTROA`, not `D_INTRO`; `tools/cut_wad.py` keeps it.
+  Current data file `data/e1m1_cut3.whx` = 726,648 B (WAD-derived: never commit). `tools/whd_gen` is the
+  Mac build of the converter.
+- Not done / known gaps: no sound or music (stubs report "no device"); keys are PC keys, not the FM-1
+  panel; the episode menu still lists three episodes; finishing the level will hit the cut intermission
+  art; savegame menu entries exist but do nothing; `Ctrl` (fire) could not be exercised through the
+  browser automation, though firing worked in the native scripted test.
+- Browser build is 1.12 MB of wasm, of which 727 KB is the embedded data; not comparable to the pi32v2
+  size (225 KB engine).
+
+## 2026-10-07/08 — Sound, controls, one-level flow, and a linked firmware image (Mac only)
+
+### Sound (browser build)
+- VERIFIED: rp2040-doom's own mixer (`src/pico/i_picosound.c`) and OPL music player (`opl/opl_pico.c`) compile
+  unchanged against a small shim (`src/fm1/shim/pico/audio_i2s.h`, `src/fm1/fm1_audio.c`): they fill a ring
+  buffer at 49,716 Hz (the OPL chip's rate); the output side pulls with linear resampling to its own rate
+  (44.1 kHz on the FM-1, the AudioContext's in the browser).
+- VERIFIED by measurement only: the title screen produces a signal peaking around 0.5 of full scale and, once
+  running, 4 s of play had 0 underrun frames. **Nobody has listened to it yet** — I cannot hear the output.
+- One core means the mixer only runs when the game calls it: once per shown frame plus the engine's own wait
+  loops. A level load leaves a gap of silence.
+
+### Controls (VERIFIED in the browser build)
+`src/fm1/fm1_controls.c` maps the panel to Doom keys; the page now feeds the game only through a panel model.
+
+| FM-1 control | Action |
+| --- | --- |
+| G#3 / A#3 | forward |
+| G3, B3 | turn left, right |
+| A3 | back |
+| F3, C4 | strafe left, right |
+| F#3, F#5 | run |
+| E5, F5, REC button | fire |
+| D5, G5 | use / open |
+| HOME | menu (Esc) |
+| PLAY | select (Enter) |
+| OCT-, OCT+, KNOB 4 | previous / next weapon |
+| SELECT knob | move through menus (weapons while playing) |
+| FX | "yes" |
+| OCT- + OCT+ held 5 s | boot-ROM mode (firmware build only; handled below the game) |
+
+### One-level flow (VERIFIED in the browser build, except level exit)
+Title waits for a key; main menu has NEW GAME and OPTIONS only; NEW GAME goes straight to skill; finishing
+the level returns to the title (code path written, **not exercised**: nobody has reached the exit switch).
+
+### Data (VERIFIED sizes)
+| File | Contents | Size |
+| --- | --- | --- |
+| `data/e1m1_6.whx` | E1M1, title picture, title + level music, no intermission art, full-rate sound | 691,380 B |
+| `data/e1m1_6h.whx` | the same with every sound effect at half rate (5,512 Hz) | 604,936 B |
+`tools/cut_wad.py SRC DST 6 [--half-sfx]`. The browser build currently embeds `e1m1_6h.whx` and plays.
+
+### Firmware image (VERIFIED: it compiles and links; NOT run on hardware)
+- `firmware/build.sh` → `firmware/build/doom.elf`. Sources: the engine and `src/fm1` platform layer, plus
+  `firmware/doom_dev.c` (one compilation unit on Felucca's HAL with Felucca's `lcd.c`, `usb.c`, `ota.c`
+  included unmodified from `./Felucca`, GPL-3.0-only), `firmware/doom.ld`, `firmware/fm1_printf.c`.
+- **Sizes: `.text` 255,700 B + `.ram_text` 2,924 B + `.data` 3,576 B = 262,200 B of flash**, everything
+  included (engine, music, mixer, platform, HAL, USB, update entry, printf).
+- RAM map (`doom.ld`): 4 KB flash-driver code, 32 KB stacks, 205 KB big buffers (frame buffers, renderer
+  work areas, audio/USB) below a 256 KB short-pointer window at `0x01C3C000` holding 28.5 KB of statics and a
+  **227 KB game heap** (the browser build runs in 200 KB).
+- What `doom_dev.c` does: Felucca's boot sequence (watchdog first, boot guard, fault vectors, guards),
+  panel scan and millisecond tick at 10 kHz, I2S output fed from the game's ring, USB-MIDI with the update
+  entry and the "enter boot mode" SysEx, OCT- + OCT+ 5 s → boot mode. If no game data is found it shows a
+  blue screen and stays updatable instead of starting the game. Crash = red screen, game panic = magenta,
+  then reset (two early failures in a row → boot mode, as Felucca).
+- Known weak spots, all unverifiable without the device: untested on hardware in every respect; the LCD
+  write blocks ~3 ms per strip (15 strips a frame, so ≥ 48 ms of every frame is spent waiting on SPI — the
+  first thing to optimise); the stack is 24 KB against an unmeasured need; the progress display during an
+  update is coloured bars, not text.
+
+### The flash layout problem (VERIFIED from `tools/fm1pkg_make.py` and Felucca's `ota.c`)
+- The engine needs its data as one contiguous block.
+- Felucca's package puts `cfg_tool.bin` and an EQ table right after a fixed 581,564-byte app slot, i.e. at
+  flash `0x920DC–0x93000`. Data cannot run through that.
+- `0xE0000–0xE7000` is the update staging area and update-record position; any update writes there.
+- So the only contiguous run long enough is: **code, then the cfg files, then data up to `0xE0000`**. With a
+  262 KB image that leaves about **631 KB** — enough for the half-rate-sound data (605 KB), not for the
+  full-rate data (691 KB, 60 KB over).
+- That layout needs two things no existing tool does, both still to be built and both boot-relevant:
+  1. a package whose app slot is only as long as the code (cfg files moved up behind it). ASSUMED the SPL
+     follows the directory entries rather than fixed offsets; only hardware can confirm.
+  2. writing `0x93000–0xE0000`. The standard update loader and Transporter stop at `0x93000`.
+
+## 2026-10-08 — Installable package and update loader (built and host-tested; NOT installed, NOT run on hardware)
+
+- `firmware/pack.py DATA.whx` → `firmware/build/doom.fwsc` (925,482 B with `data/e1m1_6h.whx`).
+  VERIFIED layout: directory + code + config files end at `0x445B6`; data at `0x45000–0xD8B08`
+  (604,936 B); 29,944 B free below `0xE0000`. Image is 262,216 B.
+- What differs from a Felucca package (both ASSUMED to work on the device, neither tried):
+  1. the app slot is only as long as the code, the two SDK config files follow it, the data follows them.
+     Relies on the boot code finding files through the directory entries rather than at fixed offsets.
+  2. data below `0x93000` is stored encrypted exactly like code and data from `0x93000` up is stored plain.
+     Relies on the flash decryption being purely address-based across the whole app area.
+- The package carries a variant of Felucca's update loader: two constants in `ldr_core.c` and one in
+  `loader.c` changed so it writes `[0x4000, 0xE0000)` instead of `[0x4000, 0x93000)`. `pack.py` generates it
+  into `Felucca/build/doomldr/` and stops if any replaced line is not found exactly once.
+- VERIFIED offline by `pack.py`: the data reads back contiguous through a simulated decrypt; no 4 KB
+  boundary in the data region looks like an update record (the boot code scans for those).
+- VERIFIED by `firmware/test.sh` on Felucca's simulated flash and fake update host:
+  - Felucca's own update-entry test, unmodified, accepts the Doom package and stages its loader, writing
+    only `0xE0000–0xE4FFF`;
+  - the extended loader installs Doom over Felucca: app area and data region equal the package, the head
+    `[0, 0x4000)` untouched, nothing written above `0xE0000` except clearing the two update records, a
+    damaged package and a wrong-key package refused before any erase, re-install erases nothing;
+  - the way back: Felucca's own loader test, unmodified, installs Felucca over an installed Doom.
+  - Felucca's installer (`fm1_install.py` `load_package`) accepts the package (identity `FM-1_900`).
+- What those tests do NOT show: that the SPL boots this layout; that the firmware runs at all; that
+  Felucca (or stock) copes with game data left in `0x93000–0xE0000` after going back — Felucca's store is
+  checksummed so it should treat it as empty (ASSUMED), stock is unknown.
+- Consequence for recovery: installing Doom destroys whatever is in `0x93000–0xE0000` (Felucca projects /
+  samples, or the stock firmware's saved presets). The Transporter dump taken beforehand is the only copy,
+  and the extended loader is the only tool that can write that region back (as a package built from the
+  dump — not written yet).
+- Other firmware changes: LCD strips now alternate between two buffers so the SPI transfer of one overlaps
+  composing the next (strip height 8 lines); no C++ static constructors exist in the image (checked);
+  big-buffer area has 964 B to spare.
+- VERIFIED in the browser build: forcing the level to finish (`Module._fm1_web_exit_level()` in the page's
+  console) returns to the title, and a new game starts normally afterwards, with no errors.
+- The project root is now a git repository (branch `work`); clones, WADs, data and build output are ignored.
+
+## Where things stand: device-free work is finished
+
+Everything that can be built or checked without the FM-1 has been. What remains needs the device, and each
+item is a first-time-on-hardware unknown:
+
+1. Recovery kit: XIAO RP2040 + wiring + Transporter build (pico-sdk is cloned; ARM GCC, picotool and
+   `wl82loader.bin` are not installed), then two matching full dumps.
+2. Phase 1 as planned: stock Felucca in and back out.
+3. First Doom boot. Unknowns it will settle, in the order they would show up: does the SPL boot the
+   shorter app slot; does the screen come up; does the game start or hit a fault (stack size, short-pointer
+   window, anything `PICO_ON_DEVICE` still assumes); frame rate; sound.
+4. Then tuning: CPU clock, LCD SPI speed, moving hot loops to RAM, full-rate sound if space allows.
+
+Suggested first step on hardware, before any Doom data: install the Doom firmware **without** game data
+through the normal Felucca-style package (standard layout, standard loader). It would show the blue
+"no data" screen and prove boot, screen, USB update and the way back, without touching `0x93000+`.
+That package variant is not built yet (a 20-minute change to `pack.py`).

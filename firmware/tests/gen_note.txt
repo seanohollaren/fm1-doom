@@ -1,0 +1,2 @@
+doom_ldr_test.c was generated once from Felucca's tests/ldr_test.c (commit 276f72a) by a script of checked
+text replacements (see NOTES.md); regenerate by hand if Felucca's test changes.

@@ -1,0 +1,2 @@
+#pragma once
+namespace std { template <class T> struct set { void insert(const T &) {} unsigned size() const { return 0; } }; }

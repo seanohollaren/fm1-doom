@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FM-1 Doom (browser build)</title>
+<style>
+  body { background: #222; color: #ccc; font: 14px system-ui, sans-serif; text-align: center; }
+  canvas { width: 480px; height: 480px; image-rendering: pixelated; background: #000; border: 8px solid #111; border-radius: 6px; }
+</style>
+<p>FM-1 Doom &mdash; 240&times;240 panel, shown 2&times;</p>
+<canvas id="lcd" width="240" height="240" tabindex="0"></canvas>
+<p>PC key &rarr; FM-1 control: arrows &rarr; G#3 G3 A3 B3 (move / turn) &middot; , . &rarr; F3 C4 (strafe) &middot; Shift &rarr; F#3 (run)<br>
+Ctrl or F &rarr; F5 / E5 (fire) &middot; Space &rarr; G5 (use) &middot; Enter &rarr; PLAY &middot; Esc &rarr; HOME (menu) &middot; [ ] &rarr; OCT- OCT+ (weapon) &middot; - = &rarr; SELECT knob<br>
+<span id="fps"></span></p>
+<script>
+  // PC key -> FM-1 panel element. n: note key (0 = F3 .. 26 = G5), b: button by printed label, e: [encoder, steps].
+  // The game only ever sees the panel; rp2040-doom/src/fm1/fm1_controls.c turns it into Doom keys.
+  const BTN = { FX: 0, SCL: 1, ENV: 2, LFO: 3, EDIT: 4, GLO: 5, HOME: 6, SAVE: 7, ARP: 8, SEQ: 9, PLAY: 10, REC: 11, OCTDN: 12, OCTUP: 13 };
+  const PANEL = { ArrowUp: {n: 3}, ArrowLeft: {n: 2}, ArrowDown: {n: 4}, ArrowRight: {n: 6}, Comma: {n: 0}, Period: {n: 7},
+                  ShiftLeft: {n: 1}, ShiftRight: {n: 25}, ControlLeft: {n: 24}, ControlRight: {n: 24}, KeyF: {n: 23}, Space: {n: 26},
+                  Escape: {b: BTN.HOME}, Enter: {b: BTN.PLAY}, KeyR: {b: BTN.REC}, BracketLeft: {b: BTN.OCTDN}, BracketRight: {b: BTN.OCTUP},
+                  KeyY: {b: BTN.FX}, Minus: {e: [0, -1]}, Equal: {e: [0, 1]}, Digit9: {e: [6, -1]}, Digit0: {e: [6, 1]} };
+  var Module = {
+    onRuntimeInitialized() {
+      const ctx = document.getElementById('lcd').getContext('2d'), img = ctx.createImageData(240, 240);
+      let notes = 0, buttons = 0;
+      const key = (e, down) => {
+        const k = PANEL[e.code]; if (!k) return;
+        e.preventDefault();
+        if (k.e) { if (down) Module._fm1_web_enc(k.e[0], k.e[1]); return; }
+        if (k.n !== undefined) notes = down ? notes | 1 << k.n : notes & ~(1 << k.n);
+        else buttons = down ? buttons | 1 << k.b : buttons & ~(1 << k.b);
+        Module._fm1_web_panel(notes, buttons);
+      };
+      // sound starts on the first key or click (browsers require a user gesture)
+      let audio = null;
+      const startAudio = () => {
+        if (audio) return;
+        audio = new AudioContext();
+        const node = audio.createScriptProcessor(1024, 0, 2);
+        node.onaudioprocess = e => {
+          const n = e.outputBuffer.length, p = Module._fm1_web_audio(n, audio.sampleRate) >> 1, h = Module.HEAP16;
+          const l = e.outputBuffer.getChannelData(0), r = e.outputBuffer.getChannelData(1);
+          let peak = 0;
+          for (let i = 0; i < n; i++) { l[i] = h[p + 2 * i] / 32768; r[i] = h[p + 2 * i + 1] / 32768; peak = Math.max(peak, Math.abs(l[i])); }
+          window.fm1Peak = Math.max(window.fm1Peak || 0, peak); window.fm1AudioCalls = (window.fm1AudioCalls || 0) + 1;
+        };
+        node.connect(audio.destination);
+      };
+      addEventListener('keydown', startAudio); addEventListener('mousedown', startAudio);
+      addEventListener('keydown', e => { if (!e.repeat || (PANEL[e.code] || {}).e) key(e, 1); else e.preventDefault(); });
+      addEventListener('keyup', e => key(e, 0));
+      let last = 0, lastT = performance.now();
+      const draw = () => {
+        const p = Module._fm1_web_lcd(), h = Module.HEAPU8, d = img.data;
+        for (let i = 0, o = 0; i < 240 * 240; i++, o += 4) {
+          const v = h[p + 2 * i] << 8 | h[p + 2 * i + 1];            // the panel's byte order: high byte first
+          d[o] = (v >> 11) << 3; d[o + 1] = (v >> 5 & 63) << 2; d[o + 2] = (v & 31) << 3; d[o + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        const now = performance.now();
+        if (now - lastT > 1000) { const f = Module._fm1_web_frames(); document.getElementById('fps').textContent = (f - last) + ' fps'; last = f; lastT = now; }
+        requestAnimationFrame(draw);
+      };
+      draw();
+    }
+  };
+</script>
+<script src="doom.js"></script>

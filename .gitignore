@@ -1,0 +1,30 @@
+# other people's repositories, cloned here (rp2040-doom carries our branch fm1-port in its own clone)
+/Felucca/
+/FM-1-transporter/
+/doomgeneric/
+/rp2040-doom/
+/pico-sdk/
+/pico-extras/
+/pico-host-sdl/
+# game data: never commit a WAD or anything cut from one
+/wads/
+/data/
+*.wad
+*.whx
+*.whd
+tiny.whd.h
+# build output
+/host-build/
+/web/build/
+/firmware/build/
+/sizecheck/obj/
+/sizecheck/*.elf
+/sizecheck/*.o
+/sizecheck/*.map
+/sizecheck/err.tmp
+/sizecheck/errors.log
+/sizecheck/nm_*.txt
+/sizecheck/link.err
+/tools/whd_gen
+*.fwsc
+.DS_Store
