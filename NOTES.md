@@ -606,3 +606,28 @@ through the normal Felucca-style package (standard layout, standard loader). It 
 That package now exists: `firmware/pack.py --no-data` → `firmware/build/doom_nodata.fwsc` (610,086 B),
 Felucca's exact layout with Felucca's own unmodified loader. VERIFIED with Felucca's own unmodified tests:
 its update entry accepts it, its loader installs it over Felucca, and Felucca installs back over it.
+
+## 2026-10-08 — "Frozen enemy" report from Sean: a data-cut bug, now fixed; enemy behaviour verified
+
+- Sean saw a figure standing motionless ahead of the start position in the browser build.
+- VERIFIED cause: it is not a monster. E1M1 has corpse decorations near the start (thing types 10 "bloody
+  mess", 15 "dead player") that are drawn with player sprites (`PLAYW0`, `PLAYN0`). My data cut removed
+  all player sprites, and the engine then drew some other picture — a standing figure — in their place.
+  The real monsters on this level are all further east (x ≥ 2272; the start is at x = 1056).
+- Fix: `tools/cut_wad.py` keeps `PLAYN0` and `PLAYW0`. The converter insists on every frame of a sprite
+  being present, so the other player frames get a 1x1 stand-in. Data grows 2 KB:
+  `data/e1m1_6h.whx` is now **606,952 B** (27,928 B free below `0xE0000`). The start view now shows the
+  gibbed corpse as in the original game.
+- Enemy behaviour, VERIFIED in the FM-1 build (the 32-bit small-memory configuration) with a new headless
+  test, `node web/test_node.js 2912 -2700`: it starts a game through the panel model, places the player
+  in front of a zombieman, fires, and consumes audio as the page does. Result: 2 monsters leave their idle
+  states at once, the player's health falls 100 → 25 over 14 s, 35 frames a second throughout, sound
+  output active, no audio underruns after start-up. The native reference build behaves the same at the
+  same spot (2 awake, health dropping).
+- Idle monsters only swap between two standing frames until they see or hear the player; gunfire in the
+  start room does not reach them (same in the reference build with the original, uncut data).
+- A browser-automation hang during this investigation was my own test hook walking the object list while
+  no level was loaded; the hooks now refuse outside a level. It was not a game bug.
+- Lesson recorded: the cut removes data the level references indirectly. Other candidates to check when
+  the level is played through: any thing type whose sprite I dropped, sounds triggered by rarely used
+  actions, and textures revealed only by switches or lifts.

@@ -61,6 +61,14 @@ for i, (nm, data) in enumerate(L):
         if nm.startswith('DP'): continue
         drop = ('CREDIT','HELP1','HELP2','WIMAP0','VICTORY','PFUB','END','WIA','WIURH','WISPLAT','DMXGUS') + (('WI',) if level >= 5 else ()) + (('TITLEPIC',) if level >= 4 and not KEEP_TITLE else ())
         if sect is None and nm.startswith(drop) and nm not in ('ENDOOM',): continue
+    # E1M1 has corpse decorations drawn with player sprites (dead marine PLAYN0, gibs PLAYW0): keep just those frames
+    if sect == 'S' and level >= 3 and nm[:4] == 'PLAY':
+        if nm[4] in 'NW': out.append((nm, data))
+        elif nm == 'PLAYA1':
+            # the converter wants every frame of a sprite present: a 1x1 single-pixel stand-in for the unused ones
+            tiny = struct.pack('<hhhhi', 1, 1, 0, 0, 12) + bytes([0, 1, 0, 0, 0, 0xFF])
+            for letter in 'ABCDEFGHIJKLMOPQRSTUV': out.append(('PLAY' + letter + '0', tiny))
+        continue
     if sect == 'S' and nm[:4] not in need: continue
     if sect == 'F' and level >= 2 and nm not in fl: continue
     if sect == 'P' and level >= 2 and nm not in usedp: continue
