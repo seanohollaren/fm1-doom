@@ -55,7 +55,7 @@ for i, (nm, data) in enumerate(L):
     if nm.startswith('D_') and nm not in ('D_E1M1', 'D_INTROA') and level >= 1: continue   # the level's music and the title jingle (the OPL version)
     if nm.startswith('DEMO') and level >= 1: continue
     if level >= 3:
-        if sect == 'S' and nm[:4] in ('POL5','LAUN','MGUN','CHGG','CHGF','MISL'): continue
+        if sect == 'S' and nm[:4] in ('LAUN','MGUN','CHGG','CHGF','MISL'): continue   # multiplayer-only pickups and their weapons (POL5, the blood pool decoration, stays: 7 of them in E1M1)
         SFX = 'PISTOL SHOTGN SGCOCK PUNCH BAREXP FIRSHT FIRXPL PSTART PSTOP DOROPN DORCLS STNMOV SWTCHN SWTCHX PLPAIN PLDETH OOF NOWAY ITEMUP WPNUP SLOP TELEPT POSIT1 POSIT2 POSIT3 BGSIT1 BGSIT2 POPAIN PODTH1 PODTH2 PODTH3 BGDTH1 BGDTH2 POSACT BGACT CLAW TINK'.split()
         if nm.startswith('DS') and nm[2:] not in SFX: continue
         if nm.startswith('DP'): continue

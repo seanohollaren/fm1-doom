@@ -628,6 +628,10 @@ its update entry accepts it, its loader installs it over Felucca, and Felucca in
   start room does not reach them (same in the reference build with the original, uncut data).
 - A browser-automation hang during this investigation was my own test hook walking the object list while
   no level was loaded; the hooks now refuse outside a level. It was not a game bug.
+- Follow-up check of every object type placed in E1M1 against the sprites kept (VERIFIED): one more was
+  missing, the blood-pool decoration (type 24, sprite `POL5`, 7 on the level). Kept now; data is **607,328 B**
+  (27,552 B free). The chaingun, rocket launcher and box of rockets on this level are multiplayer-only, so
+  their sprites stay cut. No other placed object lacks its sprite.
 - Lesson recorded: the cut removes data the level references indirectly. Other candidates to check when
   the level is played through: any thing type whose sprite I dropped, sounds triggered by rarely used
   actions, and textures revealed only by switches or lifts.
