@@ -870,3 +870,28 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
 - Reminder from the boot-flow notes: after a power cycle the SPL looks for an update record at every
   "4 KB boundary minus 256" between `0x93000` and `0xFC000`. Any test write in that range must leave the last
   256 bytes of its sector blank.
+
+## 2026-10-09 — Write side of the boot-mode tooling (built, NOT yet run on the device)
+
+- New: `tools/fm1restore.py` (`selftest`, `compare`, `sectortest`, `restore`). The only flash-changing commands
+  in it are ERASE_SECTOR `FB01` and WRITE_FLASH `FB04` (512 B), as FM-1 Transporter uses them. Built-in rules:
+  nothing below `0x4000` ever; whole 4 KB sectors only; only sectors that differ; each read back, three tries;
+  the backup must pass `check_dump.py` and its first `0x4000` bytes must equal the device's; `restore` without
+  `--write` is a dry run; default window is the app area `[0x4000, 0x93000)`, `--all` extends to the end.
+  When the directory sector `0x4000` differs it is erased first and programmed last. Ctrl-C is ignored while
+  sectors are being written; if sectors still differ the tool keeps the loader alive and offers a retry.
+- `sectortest [BACKUP]`: on a sector in the gap `[0x93000, 0x97000)` (default `0x95000`) that must be blank:
+  erase → blank? → program a pattern (last 256 bytes left blank, because the SPL looks for update records at
+  "4 KB − 256") → reads back? → erase → blank? → neighbours unchanged? → with a backup: full read, every
+  sector outside Felucca's own save areas (`0xE5000–0xE8000`, `0xFC000–0x100000`) must equal the backup.
+- VERIFIED on the Mac: `fm1restore.py selftest`, 45 checks against a simulated NOR flash (bits only clear on
+  program; asserts on any erase/program below `0x4000` or without a prior erase): the sector test, refusals
+  outside the gap, the dry run, app-area and full restores, a bad program retried, a sector that never
+  erases reported, a foreign head refused, a USB failure reported. The real backup loads as a sound image.
+- VERIFIED in Felucca's `fm1_flash.h`: its flash driver erases and programs with plain WREN / `0x20` / `0x02`
+  and never touches the status register, and its loader wrote the app area on this unit today. So no
+  block-protection is in play; a write test in the gap exercises the same commands a restore would use.
+- Decision: no full "rehearsal restore" before `doom_code`. It would run the one risky operation (rewriting
+  the whole app area from the Mac) for certain, to protect against needing it with maybe 30–40 %
+  probability. The blank-sector test proves the command path without putting anything bootable at risk.
+- Process note: I do not run write-capable device commands myself; Sean runs them after seeing the command.
