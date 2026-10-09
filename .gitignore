@@ -28,3 +28,5 @@ tiny.whd.h
 /tools/whd_gen
 *.fwsc
 .DS_Store
+/refs/
+/jl-uboot-tool/

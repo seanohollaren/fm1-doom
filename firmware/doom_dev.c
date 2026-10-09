@@ -2,12 +2,27 @@
 /* FM-1 Doom: the device side. One compilation unit on Felucca's header-only HAL and its lcd / usb / ota sources
  * (Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, GPL-3.0-only), put together the way
  * Felucca's own firmware/src/main.c and firmware/loader/loader.c are. It provides what the game's platform layer
- * asks for (rp2040-doom/src/fm1/fm1.h) and keeps every safety net Felucca has:
- *   - the watchdog is armed first thing and fed from the game loop;
- *   - two boots in a row that die in their first 30 s -> mask-ROM UBOOT;
- *   - OCT- + OCT+ held 5 s -> UBOOT;  USB SysEx F0 22 24 35 7D F7 -> UBOOT;
- *   - the USB-MIDI update entry (the web installer / fm1_install.py) works while the game runs, and also
- *     when there is no game data at all.
+ * asks for (rp2040-doom/src/fm1/fm1.h).
+ *
+ * RECOVERY FIRST. Everything in this file except the two game hooks at the end is the "recovery core": it must be
+ * able to take a new firmware over USB whatever state the game or its data are in. The boot order is built for that:
+ *
+ *   1. watchdog armed, boot guard counted                         (Felucca's code, first thing)
+ *   2. RAM set up, fault vectors and guards                       (Felucca's code)
+ *   3. flash probed, screen and keys up, keys scanned once
+ *   4. SAFE MODE is chosen if any of these holds:
+ *        - the previous start died in its first 30 s              (amber screen)
+ *        - HOME is held while switching on                        (cyan screen)
+ *        - there is no game data, or it fails its checksums       (blue screen; one white corner = none,
+ *                                                                  two = the second block is missing or damaged)
+ *      Safe mode starts USB and the 10 kHz tick and then only answers the update protocol. It never touches the
+ *      audio hardware, never calls into the game and never reads the game data again.
+ *   5. otherwise the audio output is started and the game runs.
+ *
+ * Ways out that need nothing from the game: USB update (web installer / fm1_install.py) in either mode;
+ * OCT- + OCT+ held 5 s -> mask-ROM UBOOT; USB SysEx F0 22 24 35 7D F7 -> UBOOT; three failed starts in a row
+ * (i.e. safe mode itself keeps dying) -> UBOOT. In safe mode, PLAY held 2 s forgets the failure and restarts.
+ *
  * NOT YET RUN ON HARDWARE. */
 #include <stdint.h>
 #include <stddef.h>
@@ -45,9 +60,14 @@ struct { uint32_t magic, failed, pending; } bootguard __attribute__((section(".n
 
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[], _bigbss_start[], _bigbss_end[];
 extern uint32_t _rt_start[], _rt_end[], _rt_load[];
-extern uint8_t _heap_start[], _heap_end[], _whd_load[];
+extern uint8_t _heap_start[], _heap_end[];
+extern const uint8_t _desc_load[];
 extern void (*_init_array_start[])(void), (*_init_array_end[])(void);
 int main(void);
+
+enum { MODE_GAME, SAFE_FAILED, SAFE_KEY, SAFE_NODATA, SAFE_PART2 };
+static uint8_t dev_mode;
+static uint8_t flash_ok;                 /* the expected 1 MiB part answered (as Felucca's persist_boot) */
 
 /* ------------------------------------------------------------------ flash (as Felucca's storage_hw.c) --- */
 static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off windows */
@@ -66,14 +86,13 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
     return 0;
 }
 
-/* ------------------------------------------------------------------ audio out --- */
+/* ------------------------------------------------------------------ audio out (game mode only) --- */
 #define HALF_FRAMES 128u
 #define HALF_WORDS (HALF_FRAMES * 2u)
 #define OUT_RATE 44118u                  /* the I2S frame rate Felucca measured: 24 MHz / 544 */
 #define OUT_SHIFT 7                      /* 16-bit -> the codec's 24-bit words, -6 dBFS ceiling (as Felucca) */
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static int16_t apcm[HALF_WORDS];
-static volatile uint32_t audio_halves;
 
 void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
 {
@@ -86,7 +105,6 @@ void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
         for (i = 0; i < HALF_WORDS; i++)
             o[i] = (int32_t)apcm[i] * (1 << OUT_SHIFT);
         fm1_audio_ack_half();
-        audio_halves++;
     }
 }
 extern void isr_alnk0(void);
@@ -127,19 +145,20 @@ static int ota_in_area(uint32_t off, uint32_t n) { return FL_IN(off, n, DEV_OTA_
 static int ota_erase(uint32_t off)
 {
     uint32_t took;
-    if (!ota_in_area(off, 0x1000u) || (off & 0xFFFu))
+    if (!flash_ok || !ota_in_area(off, 0x1000u) || (off & 0xFFFu))
         return -8;
     audio_silence();
     return fl_erase4k(off, &took);
 }
 static int ota_prog(uint32_t off, const void *p, uint32_t n)
 {
-    if (!ota_in_area(off, n))
+    if (!flash_ok || !ota_in_area(off, n))
         return -8;
     return fl_write(off, p, n);
 }
-static int ota_fread(uint32_t off, void *p, uint32_t n) { return st_read(off, p, n); }
+static int ota_fread(uint32_t off, void *p, uint32_t n) { return flash_ok ? st_read(off, p, n) : -8; }
 static void dev_screen(uint16_t c) { lcd_fill(0, 0, 240, 240, c); }
+static void dev_mode_screen(void);
 static void ota_show(uint32_t step, int32_t code)   /* no font in this build: a white bar per step on blue, red = failed */
 {
     if (step < 9u) {
@@ -152,7 +171,8 @@ static void ota_show(uint32_t step, int32_t code)   /* no font in this build: a 
 }
 static void ota_commit(const uint8_t *parm)
 {
-    bootguard.pending = 0;               /* intentional reset */
+    bootguard.pending = 0;               /* intentional reset, and the next firmware starts with a clean record */
+    bootguard.failed = 0;
     usb_detach();
     fm1_delay_ms(30);
     fm1_enter_update(parm);
@@ -181,13 +201,14 @@ void fm1_dev_panic(void)                 /* the game's panic() / I_Error (fm1_sd
     fm1_reboot();
 }
 
-/* ------------------------------------------------------------------ housekeeping, once per game tic --- */
+/* ------------------------------------------------------------------ housekeeping --- */
 static const uint8_t DEV_BTN[14] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 1};   /* label -> matrix id (panel.c PANEL_DEFAULT) */
-static const uint8_t DEV_ENC[FM1_NKNOB] = {0, 1, 6, 2, 3, 4, 5};                     /* role -> matrix encoder */
+static const uint8_t DEV_ENC[FM1_NKNOB] = {0, 1, 6, 2, 3, 4, 5};                    /* role -> matrix encoder */
 
 static void dev_enter_uboot(void)
 {
-    fm1_audio_stop();
+    if (dev_mode == MODE_GAME)
+        fm1_audio_stop();
     dev_screen(0x0010);
     usb_detach();
     fm1_delay_ms(30);
@@ -195,6 +216,7 @@ static void dev_enter_uboot(void)
     fm1_enter_uboot();
 }
 
+/* watchdog, boot guard, the UBOOT key chord, the update protocol. Game mode: once per game tic; safe mode: its loop */
 static void dev_service(void)
 {
     static uint32_t both_t0;
@@ -202,8 +224,9 @@ static void dev_service(void)
     fm1_wdt_feed();
     usb_retry(fm1_ms);
     if (fm1_ms > 30000u && bootguard.pending) {
-        bootguard.pending = 0;
-        bootguard.failed = 0;
+        bootguard.pending = 0;           /* this start survived its first 30 s */
+        if (dev_mode == MODE_GAME)
+            bootguard.failed = 0;        /* (safe mode keeps the count: it stays in safe mode across resets) */
     }
     if ((fm1_in.buttons & both) != both)
         both_t0 = fm1_ms;
@@ -214,10 +237,64 @@ static void dev_service(void)
         usb.ota_req = 0;
         audio_silence();
         ota_session();                   /* returns only if nothing was committed */
-        dev_screen(0);
+        if (dev_mode == MODE_GAME)
+            dev_screen(0);
+        else
+            dev_mode_screen();
     }
     if (usb.uboot_req)
         dev_enter_uboot();
+}
+
+/* ------------------------------------------------------------------ game data: where it is and whether it is whole --- */
+/* firmware/pack.py writes this 64-byte descriptor right after the image; block 1 of the data follows it (inside
+ * the app slot), block 2 is at flash offset off2 (0x93000 up, readable as plain XIP once the flash is probed) */
+typedef struct {
+    uint8_t magic[4];                    /* "FM1D" */
+    uint32_t ver, total, split, crc1, off2, crc2, rsv[8], dcrc;
+} dev_desc_t;
+_Static_assert(sizeof(dev_desc_t) == 64, "descriptor layout");
+#define DEV_DESC ((const dev_desc_t *)(const void *)_desc_load)
+
+static uint32_t dev_crc(const uint8_t *p, uint32_t n)       /* CRC16 in 4 KiB steps, the watchdog fed */
+{
+    uint32_t c = 0;
+    while (n) {
+        uint32_t k = n > 4096u ? 4096u : n;
+        c = ota_crc16(p, k, c);
+        fm1_wdt_feed();
+        p += k;
+        n -= k;
+    }
+    return c;
+}
+
+static uint8_t dev_data_check(void)      /* MODE_GAME if everything the game will read is there and intact */
+{
+    const dev_desc_t *d = DEV_DESC;
+    const uint8_t *b1 = _desc_load + sizeof(dev_desc_t);
+    if (d->magic[0] != 'F' || d->magic[1] != 'M' || d->magic[2] != '1' || d->magic[3] != 'D' || d->ver != 1u ||
+        ota_crc16((const uint8_t *)d, 60, 0) != d->dcrc || d->split > d->total || d->total > 0x100000u)
+        return SAFE_NODATA;
+    if (b1[0] != 'I' || b1[1] != 'W' || b1[2] != 'H' || b1[3] != 'X' || dev_crc(b1, d->split) != d->crc1)
+        return SAFE_NODATA;
+    if (d->split < d->total) {           /* a second block, above the app area */
+        if (!flash_ok || d->off2 < 0x93000u || d->off2 + (d->total - d->split) > 0xE0000u)
+            return SAFE_PART2;
+        if (dev_crc(fm1_xip_ptr(d->off2), d->total - d->split) != d->crc2)
+            return SAFE_PART2;
+    }
+    return MODE_GAME;
+}
+
+static void dev_mode_screen(void)
+{
+    switch (dev_mode) {
+    case SAFE_FAILED: dev_screen(0xFD20); break;                                     /* amber: the last start failed */
+    case SAFE_KEY: dev_screen(0x07FF); break;                                        /* cyan: HOME was held */
+    case SAFE_PART2: dev_screen(0x0010); lcd_fill(0, 0, 24, 24, 0xFFFF); lcd_fill(216, 0, 24, 24, 0xFFFF); break;
+    default: dev_screen(0x0010); lcd_fill(0, 0, 24, 24, 0xFFFF); break;              /* blue: no game data */
+    }
 }
 
 /* ------------------------------------------------------------------ the game's platform interface --- */
@@ -227,6 +304,14 @@ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t
                                           * composes the next strip (in its other buffer) while this one goes out */
 }
 uint32_t fm1_millis(void) { return fm1_ms; }
+void fm1_alive(void)                     /* the game's loops are turning: feed the watchdog (at most once a ms) */
+{
+    static uint32_t last;
+    if (fm1_ms != last) {
+        last = fm1_ms;
+        fm1_wdt_feed();
+    }
+}
 void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB])
 {
     uint32_t i, b = 0;
@@ -239,7 +324,14 @@ void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB])
     for (i = 0; i < FM1_NKNOB; i++)
         enc[i] = (int8_t)fm1_enc_take(DEV_ENC[i]);
 }
-const uint8_t *fm1_whd_base(void) { return (const uint8_t *)_whd_load; }
+const uint8_t *fm1_whd_base(void) { return _desc_load + sizeof(dev_desc_t); }
+const uint8_t *fm1_whd_part2(uint32_t *split)
+{
+    if (DEV_DESC->split >= DEV_DESC->total)
+        return NULL;
+    *split = DEV_DESC->split;
+    return fm1_xip_ptr(DEV_DESC->off2);
+}
 uint8_t *fm1_heap(uint32_t *size)
 {
     *size = (uint32_t)(_heap_end - _heap_start);
@@ -247,31 +339,25 @@ uint8_t *fm1_heap(uint32_t *size)
 }
 
 /* ------------------------------------------------------------------ boot (as Felucca's fm1_cstart / fm1_main) --- */
-static int dev_have_data(void)
-{
-    const uint8_t *w = fm1_whd_base();
-    return w[0] == 'I' && w[1] == 'W' && w[2] == 'H' && w[3] == 'X';
-}
-
 void fm1_cstart(void)
 {
-    uint32_t *s, *d, p3, src, wdt;
+    uint32_t *s, *d, p3, src, wdt, i;
     void (**f)(void);
     fm1_time_init();
     fm1_reset_reason();
     p3 = fm1_boot.p3_rst;
     src = fm1_boot.rst_src;
     wdt = fm1_boot.wdt_con;
-    fm1_wdt_arm(0x0D);
+    fm1_wdt_arm(0x0D);                   /* ~8 s */
     if (bootguard.magic != BOOTGUARD_MAGIC) {
         bootguard.magic = BOOTGUARD_MAGIC;
         bootguard.failed = 0;
         bootguard.pending = 0;
     }
     if (bootguard.pending)
-        bootguard.failed++;
+        bootguard.failed++;              /* the last start never reached 30 s */
     bootguard.pending = 1;
-    if (bootguard.failed >= 2u) {
+    if (bootguard.failed >= 3u) {        /* the game failed, then safe mode failed twice: the mask ROM's turn */
         bootguard.failed = 0;
         bootguard.pending = 0;
         fm1_enter_uboot();
@@ -291,23 +377,53 @@ void fm1_cstart(void)
     fm1_boot.rst_src = src;
     fm1_boot.wdt_con = (uint8_t)wdt;
 
-    fl_plain_window_init();              /* flash from 0x93000 up reads unencrypted (game data lives there) */
-    ota_boot_cleanup();                  /* a staging area left by an update */
+    {   /* the flash, as Felucca's persist_boot: only the expected part is ever used */
+        uint32_t k = irq_save();
+        flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;
+        irq_restore(k);
+        if (flash_ok) {
+            fl_plain_window_init();      /* flash from 0x93000 up reads unencrypted */
+            ota_boot_cleanup();          /* a staging area left by an update */
+        }
+    }
     lcd_init();
     fm1_input_init();
     fm1_adc_init();
-    audio_silence();
-    fm1_audio_init(abuf, HALF_WORDS, isr_alnk0, 3);
+    for (i = 0; i < 12u; i++)            /* the keys as they are now, before anything else runs (a press: 2 frames) */
+        fm1_input_scan();
+
+    dev_mode = MODE_GAME;
+    if (bootguard.failed)
+        dev_mode = SAFE_FAILED;
+    else if (fm1_in.buttons & (1u << DEV_BTN[FM1_BTN_HOME]))
+        dev_mode = SAFE_KEY;
+    else
+        dev_mode = dev_data_check();
+
+    if (dev_mode == MODE_GAME) {         /* the audio interrupt has to be attached before the vectors are locked */
+        fm1_wdt_arm(0x0F);               /* ~32 s: a level load must not look like a hang */
+        audio_silence();
+        fm1_audio_init(abuf, HALF_WORDS, isr_alnk0, 3);
+    }
     usb_start();
     fm1_timer5_start(isr_timer5, 4);
     fm1_guard_lock_top();
     fm1_irq_enable_all();
 
-    if (!dev_have_data()) {              /* nothing to play: stay updatable (blue screen, white corner) */
-        dev_screen(0x0010);
-        lcd_fill(0, 0, 24, 24, 0xFFFF);
+    if (dev_mode != MODE_GAME) {         /* SAFE MODE: updatable, nothing else */
+        uint32_t play_t0 = fm1_ms;
+        dev_mode_screen();
         for (;;) {
             dev_service();
+            if (!(fm1_in.buttons & (1u << DEV_BTN[FM1_BTN_PLAY])))
+                play_t0 = fm1_ms;
+            else if (fm1_ms - play_t0 > 2000u) {   /* PLAY held 2 s: forget the failure, start again */
+                bootguard.failed = 0;
+                bootguard.pending = 0;
+                usb_detach();
+                fm1_delay_ms(30);
+                fm1_reboot();
+            }
             fm1_delay_ms(5);
         }
     }

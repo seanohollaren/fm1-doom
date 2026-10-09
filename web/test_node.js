@@ -13,6 +13,7 @@ globalThis.Module = {
     // consume audio as the page does (1024 frames about every 23 ms), so the mixer really runs; track the peak
     let peak = 0;
     setInterval(() => { const p = M._fm1_web_audio(1024, 44100) >> 1; for (let i = 0; i < 2048; i += 16) peak = Math.max(peak, Math.abs(M.HEAP16[p + i])); }, 23);
+    console.log('data split at file offset', M._fm1_web_split_at());
     let n = 0;
     setTimeout(() => { const t = setInterval(() => {
       const v = M._fm1_web_awake();

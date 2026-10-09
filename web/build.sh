@@ -20,6 +20,6 @@ for f in $FILES; do
   emcc -O2 -fms-extensions -w -include rp2040-doom/src/fm1/fm1_compat.h $D $X $I -c rp2040-doom/$f -o $o 2>$OUT/err.tmp || { echo "FAIL $f"; grep -m4 "error" $OUT/err.tmp; fail=1; }
 done
 [ $fail = 0 ] || exit 1
-emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
+emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
 cp web/index.html $OUT/
 echo "web: $OUT ($(wc -c < $OUT/doom.wasm | tr -d ' ') B wasm)"

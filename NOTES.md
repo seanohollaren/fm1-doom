@@ -635,3 +635,91 @@ its update entry accepts it, its loader installs it over Felucca, and Felucca in
 - Lesson recorded: the cut removes data the level references indirectly. Other candidates to check when
   the level is played through: any thing type whose sprite I dropped, sounds triggered by rarely used
   actions, and textures revealed only by switches or lifts.
+
+## 2026-10-09 — Review for recoverability, and a staged install plan (Mac only; nothing installed)
+
+Sean has no Transporter hardware yet and asked how to minimise the risk of bricking, accepting smaller steps.
+
+### What the review found (all VERIFIED in code or by a build check, all fixed)
+1. **Start-up data copy was off by 4 bytes.** My linker script put 4 bytes of padding inside `.data` while the
+   start-up code copied from the section's start to a label 4 bytes in. Every initialised variable would have
+   been shifted. The packages built on 2026-10-08 had this bug and would not have run correctly.
+   Fixed (`doom.ld`: the region starts 4 bytes in instead); `pack.py` now refuses an image whose `.data` /
+   `.ram_text` files are not exactly the size the start-up code copies.
+2. **My supervisor stack overlapped the place Felucca's start-up code writes to.** `crt0.S` (used unchanged)
+   stores the state handed over by the boot loader at `0x01C07F00`, which Felucca keeps free. Harmless at that
+   instant, but not something to leave. The memory map now leaves `0x01C07000–0x01C08000` alone.
+3. **The loader variant refused ordinary packages** (it required the long flash image). Had it ever been the
+   loader left staged by an interrupted install, a plain Felucca package could not have been fed to it to get
+   out. It now handles an ordinary package exactly as Felucca's loader does, and Felucca's own loader test
+   (one include line changed) passes against it.
+4. The flash was used without Felucca's check that the expected chip answers (`0x856014`). Added, as Felucca.
+5. The watchdog was only fed once per game tic, so a slow level load could have looked like a hang. The game
+   now feeds it from every clock read and every shown frame, and game mode uses the 32 s setting.
+6. The audio interrupt did a 64-bit division per call. Now computed once.
+- Checked and found fine: no C++ static constructors in the image; the firmware uses no CPU registers outside
+  what Felucca's interrupt stubs save (compared against Felucca's own disassembly); engine code is clean for
+  CPUs that fault on unaligned access (it targets the Cortex-M0+, which does).
+
+### Toolchain check against a published release (VERIFIED)
+Our checkout is Felucca's tag `v1.1.5`. A release build made on this Mac compared with the published
+`felucca-1.1.5.fwsc` (downloaded to `refs/`): **the update loader is byte-identical.** The app differs: 8 bytes
+longer upstream, with the differences in the generated font / icon tables and the build date (ASSUMED from
+where they are; Pillow/FreeType version). So the compiler, linker and loader wrapper here reproduce the
+safety-critical binary that is running on other people's FM-1s.
+
+### Design changes for recoverability
+- **Recovery-first boot** (`firmware/doom_dev.c`, described at its top). Safe mode = USB update entry only;
+  entered after one failed start (amber), with HOME held at power-on (cyan), or when game data is missing or
+  fails its checksum (blue; two white corners = second block). Safe mode never starts audio, never calls the
+  game, never reads game data. Mask-ROM boot mode is now the third line of defence (3 failures), not the first.
+- **Felucca's exact flash layout is kept.** The game data is stored as two blocks (317,824 B inside the app
+  slot after the firmware, 289,504 B from `0x93000`); the engine turns data offsets into pointers in exactly
+  one function, which now knows the split. VERIFIED: the browser build stores the two blocks far apart with
+  64 KB of poison between them and the headless gameplay test gives the same result as before (health 25 at
+  t=13). This removes yesterday's two assumptions about the boot code (shorter app slot, config files moved).
+- A 64-byte descriptor with checksums of both blocks sits between firmware and data; the firmware verifies
+  both blocks at every start before running the game.
+- "Recovery core id" (`firmware/build/core.id`, currently `1526164b9edc8f07`): a hash of the device unit's
+  object code, Felucca's start-up/vector/interrupt stubs and the linker script. Same id as a build already
+  proven on the device = same recovery code. It did not change when only game code was rebuilt.
+
+### Three packages (replacing yesterday's two; `firmware/pack.py DATA.whx`)
+| Package | Contents | Loader | Writes above `0x93000`? |
+| --- | --- | --- | --- |
+| `doom_code.fwsc` | firmware only | Felucca's, unmodified (byte-identical to the published one) | no |
+| `doom_part1.fwsc` | firmware + descriptor + data block 1 | Felucca's, unmodified | no |
+| `doom_full.fwsc` | the same app area + data block 2 | variant: also writes `[0x93000, 0xE0000)` for a long package | yes |
+
+`firmware/test.sh`: 15 runs, all pass. Felucca's own unmodified tests cover: its update entry accepting each
+package; its loader installing `doom_code` and `doom_part1` over Felucca and Felucca back over each; Felucca
+back over the full install. The variant is covered by Felucca's checks for ordinary packages (three runs,
+including the way out of a full install) and by derived checks for the long package, including "block 2 added
+after `doom_part1`: not one sector of the app area erased".
+
+### The staged plan (each step is one install; each is a separate yes from Sean)
+| Step | What is installed | New on hardware | If it fails |
+| --- | --- | --- | --- |
+| 0 | nothing | — | — |
+| 1 | published Felucca, from its own web installer | the USB install route on this unit | as for any Felucca user; stock restores via the installer |
+| 2 | back to stock V15, then Felucca again | the way back | — |
+| 3 | `doom_code.fwsc` | our firmware's start-up, screen, keys, USB update entry (safe mode: blue) | no working USB → mask-ROM boot mode after 3 failed starts, or OCT- + OCT+ → needs a boot-mode tool |
+| 4 | Felucca over it, then `doom_code` again; also HOME-at-power-on and PLAY-2-s | the way out of safe mode, the key chords | same as 3 |
+| 5 | `doom_part1.fwsc` | data in the app slot reads back and passes its checksum (blue, two corners) | safe mode by design |
+| 6 | `doom_full.fwsc` | the loader variant; the game itself | game crash → amber safe mode, update over USB; loader trouble → it still takes any ordinary package |
+
+Step 3 is the one real leap: it is the first time code built here, other than a loader identical to
+Felucca's, has to bring up USB on the device. Everything after it is behind safe mode.
+
+### A recovery channel without the XIAO (PROPOSED, not built, needs Sean's approval)
+- VERIFIED from the docs: in mask-ROM boot mode the FM-1 shows up on an ordinary USB host as mass storage
+  `4C4A:8057`; stock V15 and Felucca both enter it on the SysEx `F0 22 24 35 7D F7`; when the host lets go it
+  resets and boots normally; the Transporter's author first did dump and restore straight from a Mac with
+  jl-uboot-tool and a macOS USB patch (that repository is not public). jl-uboot-tool (MIT, cloned read-only
+  to `./jl-uboot-tool`) includes `wl82loader.bin`, the RAM loader for this chip, but only Linux and Windows
+  transports.
+- So a Mac-only tool looks feasible: enter boot mode by SysEx, upload the RAM loader, read chip id and flash.
+  Read-only, it would give the full backup and prove the recovery channel on a healthy unit before any
+  install. ASSUMED hurdles: macOS's own mass-storage driver claims the device first (may need `sudo`), and I
+  cannot test any of it without the FM-1 attached. CLAUDE.md lists jl-uboot-tool as reference-only unless
+  approved, hence the question.

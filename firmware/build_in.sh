@@ -26,3 +26,7 @@ $CC -Os -ffunction-sections -fno-builtin -isystem /opt/jieli/pi32v2/include -c f
 /opt/jieli/common/bin/objdump -h $OUT/doom.elf | grep -E "^ +[0-9]+ \." 
 /opt/jieli/common/bin/objdump -t $OUT/doom.elf > $OUT/doom.syms
 for s in text ram_text data; do /opt/jieli/common/bin/objcopy -O binary -j .$s $OUT/doom.elf $OUT/$s.bin; done
+# identity of the recovery core: the device unit, Felucca's start-up / vector / interrupt stubs and the memory map.
+# The same id as a build that has already run on the device = the same recovery code (before linking).
+cat $OBJ/doom_dev.o $OBJ/crt0.o $OBJ/fm1_vec.o $OBJ/fm1_isr.o firmware/doom.ld | sha256sum | cut -c1-16 > $OUT/core.id
+echo "recovery core id $(cat $OUT/core.id)"

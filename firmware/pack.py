@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""FM-1 Doom: make an installable package (firmware/build/doom.fwsc) from firmware/build/doom.elf's sections and a
-game data file (.whx). Uses Felucca's package tools (./Felucca/tools, GPL-3.0-only, (C) 2026 Leo Kuroshita).
+"""FM-1 Doom: make installable packages from firmware/build/doom.elf's sections and a game data file (.whx).
+Uses Felucca's package tools unchanged (./Felucca/tools, GPL-3.0-only, (C) 2026 Leo Kuroshita).
 
-  firmware/pack.py DATA.whx      ->  firmware/build/doom.fwsc          (code + game data, new layout, extended loader)
-  firmware/pack.py --no-data     ->  firmware/build/doom_nodata.fwsc   (code only: exactly Felucca's package layout and
-                                     Felucca's own unmodified loader; on the device it shows the blue "no data" screen
-                                     and stays updatable. Writes nothing above 0x93000. The cautious first install.)
+  firmware/pack.py [DATA.whx]
 
-Two things differ from a Felucca package, and NEITHER HAS BEEN TRIED ON HARDWARE:
+Every package keeps Felucca's exact flash layout (the fixed 581,564-byte app slot, the SDK config files behind it):
+the boot code sees nothing it has not already booted on real FM-1s. Three packages, one per step:
 
-1. Layout. The game data must be one contiguous block, so the app slot is only as long as the code; the two SDK
-   config files follow it directly (Felucca keeps them behind a fixed 581,564-byte slot), and the data runs from
-   the next 4 KB boundary to at most 0xE0000, where the update staging area starts:
-       0x00000  head (never written by an update)        0x04000  directory + code + config files
-       W        game data, part 1 (stored encrypted like the code, as everything below 0x93000 is)
-       0x93000  game data, part 2 (stored plain, as everything from 0x93000 up reads)
-   flash.bin in the package is therefore 0xE0000 bytes instead of 0x93000.
-2. Loader. Felucca's update loader writes [0x4000, 0x93000) only. The package carries a variant of it (three
-   constants changed, generated into Felucca/build/doomldr/ with every replacement checked) that writes
-   [0x4000, 0xE0000). It overwrites whatever Felucca or the stock firmware keeps in 0x93000..0xE0000.
+  doom_code.fwsc    the firmware alone. Felucca's own loader, unmodified. On the device: safe mode, blue screen.
+  doom_part1.fwsc   firmware + a 64-byte descriptor + the first block of the game data, all inside the app slot.
+                    Felucca's own loader, unmodified. Nothing above 0x93000 is written. On the device: safe mode,
+                    blue screen with two white corners ("second block missing").
+  doom_full.fwsc    the same app area, plus the second block of the game data at 0x93000 (stored plain, as all
+                    flash from there up reads). Carries a VARIANT of Felucca's loader that also writes
+                    [0x93000, 0xE0000) when the package is that long, and behaves exactly as Felucca's for any
+                    ordinary package. This is the only step that writes where Felucca / the stock firmware keep
+                    their own data, and the only one that runs loader code Felucca has not shipped.
 
-Checks before anything is written out: the data reads back contiguous through the simulated decryption, and no
-4 KB boundary in the data region looks like an update record to the boot code.
+The game data is one file, stored as two blocks because no single run of flash is long enough: the app slot ends
+at the config files, and the update staging area starts at 0xE0000. The split is on a lump boundary; the engine
+turns offsets into pointers in exactly one function (w_wad.h lump_data), which knows about the two blocks.
+
+Checks before anything is written out: the two blocks read back (through a simulated decrypt) to the original
+file; the descriptor's checksums are the ones the firmware will compute; no 4 KB boundary in the data region looks
+like an update record to the boot code. NOTHING HERE HAS RUN ON HARDWARE.
 """
 import struct
 import sys
@@ -36,8 +38,9 @@ import build as fb          # noqa: E402  (Felucca's build.py: toolchain runner,
 import fm1pkg_make as pk    # noqa: E402
 
 APP_XIP = 0x02000120
-FLASH_END = 0xE0000         # the update staging area (and Felucca's update record) start here
-PLAIN_FROM = 0x93000        # flash from here up reads unencrypted (fm1_flash.h fl_plain_window_init)
+APP_AREA_END = 0x93000      # Felucca's loader writes [0x4000, 0x93000); flash from here up reads unencrypted
+DATA_END = 0xE0000          # the update staging area (and Felucca's update record) start here
+DESC_LEN = 64
 
 
 def sym(name):
@@ -49,7 +52,7 @@ def sym(name):
 
 
 def app_image():
-    """app.bin: .text, then .ram_text and .data at their load addresses (as Felucca's build.py)"""
+    """the firmware image: .text, then .ram_text and .data at their load addresses (as Felucca's build.py)"""
     img = bytearray((OUT / "text.bin").read_bytes())
     for sect, lname in (("ram_text.bin", "_rt_load"), ("data.bin", "_data_load")):
         blob = (OUT / sect).read_bytes()
@@ -57,14 +60,42 @@ def app_image():
         if load < len(img):
             raise SystemExit(f"pack: {lname} overlaps the image")
         img += b"\xff" * (load - len(img)) + blob
-    img += b"\xff" * (-len(img) % 4)
     if sym("_start") != APP_XIP or img[:4] != bytes.fromhex("04818000"):
         raise SystemExit("pack: the image does not start with the entry stub at 0x02000120")
-    return bytes(img)
+    # the start-up code copies .data word by word from _data_load to _data_start.._data_end: the file must be exactly that
+    if len((OUT / "data.bin").read_bytes()) != sym("_data_end") - sym("_data_start") or \
+            len((OUT / "ram_text.bin").read_bytes()) != sym("_rt_end") - sym("_rt_start"):
+        raise SystemExit("pack: .data / .ram_text in the image are not the size the start-up code copies")
+    desc_at = sym("_desc_load") - APP_XIP
+    if desc_at < len(img) or sym("_desc_load") % 4:
+        raise SystemExit("pack: the data descriptor would overlap the image")
+    return bytes(img), desc_at
+
+
+def split_point(whx, room):
+    """the largest lump boundary that leaves block 1 no longer than room"""
+    if whx[:4] != b"IWHX":
+        raise SystemExit("pack: not a WHX file")
+    n, table = struct.unpack_from("<ii", whx, 4)
+    offs = sorted({struct.unpack_from("<I", whx, table + 4 * i)[0] & 0xFFFFFF for i in range(n + 1)})
+    if offs[-1] > len(whx) or table + 4 * (n + 1) > offs[0]:
+        raise SystemExit("pack: unexpected WHX directory")
+    if len(whx) <= room:
+        return len(whx)
+    fit = [o for o in offs if o <= room]
+    if not fit or fit[-1] <= table + 4 * (n + 1):
+        raise SystemExit("pack: no room for even the data file's directory in the app slot")
+    return fit[-1]
+
+
+def descriptor(whx, split):
+    d = struct.pack("<4sIIIIII", b"FM1D", 1, len(whx), split, pk.crc16(whx[:split]), APP_AREA_END, pk.crc16(whx[split:]))
+    d += bytes(60 - len(d))
+    return d + struct.pack("<I", pk.crc16(d))
 
 
 def doom_loader():
-    """Felucca's loader with its write window extended to the data region"""
+    """Felucca's loader, able to write the data region too when the package is long enough for it"""
     d = FEL / "build" / "doomldr"
     d.mkdir(parents=True, exist_ok=True)
 
@@ -76,8 +107,16 @@ def doom_loader():
             s = s.replace(a, b)
         return "/* GENERATED by fm1-doom firmware/pack.py from Felucca's " + src.name + ": do not edit */\n" + s
     (d / "ldr_core.c").write_text(patched(FEL / "firmware/loader/ldr_core.c", [
-        ("#define LDR_APP_HI 0x93000u", "#define LDR_APP_HI 0xE0000u     /* fm1-doom: the app area AND the game data region */"),
-        ("#define LDR_DATA_LO 0x97000u", "#define LDR_DATA_LO 0x93000u    /* fm1-doom: no record clean-up anywhere in the data region */"),
+        ("#define LDR_APP_HI 0x93000u",
+         "static uint32_t ldr_app_hi = 0x93000u;   /* fm1-doom: 0xE0000 for a package that long (ldr_session), else as Felucca */\n"
+         "#define LDR_APP_HI ldr_app_hi"),
+        ("#define LDR_NSEC ((LDR_APP_HI - LDR_APP_LO) >> 12)",
+         "#define LDR_NSEC ((0xE0000u - LDR_APP_LO) >> 12)   /* fm1-doom: room for the longer window */"),
+        ("#define LDR_DATA_LO 0x97000u",
+         "#define LDR_DATA_LO (ldr_app_hi > 0x93000u ? 0x93000u : 0x97000u)   /* fm1-doom: no record clean-up in data just written */"),
+        ("    if (!fl_off || fl_size < LDR_APP_HI || fl_size > LDR_FL_MAX)",
+         "    ldr_app_hi = fl_size >= 0xE0000u ? 0xE0000u : 0x93000u;   /* fm1-doom: an ordinary package is handled exactly as before */\n"
+         "    if (!fl_off || fl_size < LDR_APP_HI || fl_size > LDR_FL_MAX)"),
     ]))
     (d / "loader.c").write_text(patched(FEL / "firmware/loader/loader.c", [
         ("#define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x4000u, 0x97000u) || FL_IN(off, n, 0xE0000u, 0xFC000u))",
@@ -103,104 +142,79 @@ def doom_loader():
     return fb.ldr_wrap(image)
 
 
-def flash_image(app, whx, key):
-    """as fm1pkg_make.flash_image, with the app slot as long as the code and the game data behind it"""
-    slot = len(app)
-    spl, cfg_tool, eq = pk.sdk_file("uboot.boot"), pk.sdk_file("cfg_tool.bin"), pk.sdk_file("cfg/eq_cfg_hw.bin")
-    isd = pk.key_blob(key) + b"[FELUCCA]\r\n"
-    f = bytearray(b"\xFF" * FLASH_END)
-    spl_off = 0xA0
-    isd_off = spl_off + len(spl)
-    assert isd_off + len(isd) <= 0x4000
-    f[spl_off:spl_off + len(spl)] = spl
-    f[isd_off:isd_off + len(isd)] = isd
-    top = (pk.entry(pk.crc16(spl), spl_off, len(spl), 0x00, 0x00, 0, "uboot.boot") +
-           pk.entry(pk.crc16(isd), isd_off, len(isd), 0x02, 0x80, 0, "isd_config.ini") +
-           pk.entry(0xFFFF, 0x4000, 0xFFFFFFFF, 0x81, 0xFF, 0, "app_dir_head") +
-           pk.entry(0xFFFF, 0xFF000, 0x1000, 0x12, 0x01, 0xFFFF, "key_mac"))
-    head = bytearray(struct.pack("<H", pk.crc16(pk.FLASH_HDR)) + pk.FLASH_HDR + top)
-    for o in range(0, len(head), 32):
-        pk.enc(head, o, 32)
-    f[0:len(head)] = head
-    blk = 0x120 + slot + len(cfg_tool)
-    area = bytearray(b"\xFF" * blk)
-    area[0x120:0x120 + slot] = app
-    area[0x120 + slot:blk] = cfg_tool
-    ents = [pk.entry(pk.crc16(app), 0x120, slot, 0x82, 0xFF, 0, "app.bin"),
-            pk.entry(pk.crc16(cfg_tool), 0x120 + slot, len(cfg_tool), 0x82, 0xFF, 0, "cfg_tool.bin"),
-            pk.entry(0xFFFF, 0x93000, 352256, 0x12, 0x80, 0, bytes.fromhex("564d00ffffffffffffffffff00800000")),
-            pk.entry(0xFFFF, 0, pk.FLASH_SIZE, 0x92, 0x82, 0, bytes.fromhex("5052435400ffffffffffffff434f4445")),
-            pk.entry(0xFFFF, 0xE9000, 0x1000, 0x92, 0x80, 0, bytes.fromhex("4254494600ffffffffffffff4155544f")),
-            pk.entry(0xFFFF, 0xEA000, 0x12000, 0x92, 0x81, 1, "USR")]
-    area[32:32 + len(b"".join(ents))] = b"".join(ents)
-    area[0:32] = pk.entry(pk.crc16(area[32:blk]), 0x02000120, blk, 0x83, 0xFF, 0, "app_area_head")
-    eq_e = pk.entry(pk.crc16(eq), 0x40, len(eq), 0x82, 0xFF, 1, "eq_cfg_hw.bin")
-    cfg_body = eq_e + eq
-    cfg = pk.entry(pk.crc16(cfg_body), 0x20, 0x20 + len(cfg_body), 0x83, 0xFF, 1, "cfg") + cfg_body
-    region = area + cfg
-    w = sym("_whd_load") - 0x02000000 + 0x4000          # flash offset of the data (fm1_xip.h: XIP = 0x02000000 + off - 0x4000)
-    if w & 0xFFF or 0x4000 + len(region) > w:
-        raise SystemExit(f"pack: directory + code + config end at {0x4000 + len(region):#x}, past the data at {w:#x}")
-    if w + len(whx) > FLASH_END:
-        raise SystemExit(f"pack: data {len(whx)} B from {w:#x} ends at {w + len(whx):#x}: {w + len(whx) - FLASH_END} B past {FLASH_END:#x}")
-    f[0x4000:0x4000 + len(region)] = region
-    f[w:w + len(whx)] = whx
-    pk.sfc(f, 0x4000, PLAIN_FROM - 0x4000, 0x4000, key)  # everything below 0x93000 is stored encrypted
-    return bytes(f), w, len(region)
-
-
-def checks(flash, whx, w, key):
-    notes = []
-    back = bytearray(flash)                              # what the CPU reads: decrypted below 0x93000, as stored above
-    pk.sfc(back, 0x4000, PLAIN_FROM - 0x4000, 0x4000, key)
-    if bytes(back[w:w + len(whx)]) != whx or back[w:w + 4] != b"IWHX":
-        raise SystemExit("pack: the data does not read back contiguous")
-    notes.append(f"data reads back contiguous: {len(whx)} B at flash {w:#x}..{w + len(whx):#x} (XIP {0x02000000 + w - 0x4000:#x})")
+def record_lookalikes(flash):
+    """the boot code (and the loaders) look for an update record at each 4 KB boundary - 256 from 0x93000 up"""
     hits = []
-    for s in range(PLAIN_FROM + 0x1000, 0xFC000 + 1, 0x1000):   # the boot code looks for an update record at each 4K boundary - 256
-        r = flash[s - 0x100:s - 0x100 + 80] if s - 0x100 + 80 <= len(flash) else b""
+    for s in range(APP_AREA_END + 0x1000, 0xFC000 + 1, 0x1000):
+        r = flash[s - 0x100:s - 0x100 + 80]
         if len(r) == 80 and struct.unpack_from("<H", r, 6)[0] == 0x5441:
             c = struct.unpack_from("<H", r, 0)[0]
             if c and c == pk.crc16(r[2:80]):
                 hits.append(s - 0x100)
-    if hits:
-        raise SystemExit(f"pack: game data looks like an update record at {[hex(h) for h in hits]}: shift or change the data")
-    notes.append("no 4 KB boundary in the data region looks like an update record")
-    return notes
+    return hits
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) > 2:
         raise SystemExit(__doc__)
-    app = app_image()
-    if sys.argv[1] == "--no-data":
-        ota = (FEL / "build" / "loader" / "ota.bin").read_bytes()     # Felucca's loader, as its own build made it
-        flash = pk.flash_image(app, pk.KEY)                           # Felucca's layout, unchanged
-        back = bytearray(flash)
-        pk.sfc(back, 0x4000, len(back) - 0x4000, 0x4000, pk.KEY)
-        w = sym("_whd_load") - 0x02000000 + 0x4000
-        if back[w:w + 4] == b"IWHX":
-            raise SystemExit("pack: there is game data where none was meant to be")
-        pkg = pk.ufw(flash, ota, "FM-1_900")
-        (OUT / "doom_nodata.fwsc").write_bytes(pkg)
-        print(f"  ok    no game data at {w:#x}: the firmware will show its blue 'no data' screen")
-        print(f"app      {len(app)} B in Felucca's standard {pk.APP_SLOT} B slot, Felucca's own loader ({len(ota)} B)")
-        print(f"package  {OUT / 'doom_nodata.fwsc'}  {len(pkg)} B   NOT TESTED ON HARDWARE - do not install without review")
+    img, desc_at = app_image()
+    felucca_ota = (FEL / "build" / "loader" / "ota.bin").read_bytes()      # as Felucca's own build made it
+    core = (OUT / "core.id").read_text().strip() if (OUT / "core.id").exists() else "?"
+
+    # 1. the firmware alone
+    flash = pk.flash_image(img, pk.KEY)
+    (OUT / "doom.bin").write_bytes(img)
+    (OUT / "doom_code.fwsc").write_bytes(pk.ufw(flash, felucca_ota, "FM-1_900"))
+    print(f"firmware {len(img)} B, recovery core id {core}")
+    print(f"doom_code.fwsc   {len(pk.ufw(flash, felucca_ota, 'FM-1_900'))} B   Felucca layout, Felucca loader ({len(felucca_ota)} B), no data")
+    if len(sys.argv) < 2:
         return
+
+    # 2. + descriptor and block 1 inside the app slot
     whx = Path(sys.argv[1]).read_bytes()
-    ota = doom_loader()
-    flash, w, region = flash_image(app, whx, pk.KEY)
-    notes = checks(flash, whx, w, pk.KEY)
-    pkg = pk.ufw(flash, ota, "FM-1_900")
-    (OUT / "doom.bin").write_bytes(app)
-    (OUT / "doom_flash.bin").write_bytes(flash)
-    (OUT / "doom.fwsc").write_bytes(pkg)
-    for n in notes:
-        print("  ok   ", n)
-    print(f"app      {len(app)} B   (directory + code + config end at {0x4000 + region:#x})")
-    print(f"data     {len(whx)} B at {w:#x}, {FLASH_END - w - len(whx)} B free below {FLASH_END:#x}")
-    print(f"loader   {len(ota)} B (extended write window)")
-    print(f"package  {OUT / 'doom.fwsc'}  {len(pkg)} B   NOT TESTED ON HARDWARE - do not install without review")
+    room = pk.APP_SLOT - (desc_at + DESC_LEN)
+    split = split_point(whx, room)
+    desc = descriptor(whx, split)
+    app = img + b"\xff" * (desc_at - len(img)) + desc + whx[:split]
+    assert len(app) <= pk.APP_SLOT
+    block2 = whx[split:]
+    if APP_AREA_END + len(block2) > DATA_END:
+        raise SystemExit(f"pack: the second block ({len(block2)} B) ends {APP_AREA_END + len(block2) - DATA_END} B past {DATA_END:#x}")
+    flash1 = pk.flash_image(app, pk.KEY)                                    # Felucca's layout, Felucca's packer
+    assert len(flash1) == APP_AREA_END
+
+    # 3. + block 2 above the app area, padded to the length the loader variant takes as "write the data region too"
+    flash2 = bytearray(flash1 + b"\xff" * (DATA_END - APP_AREA_END))
+    flash2[APP_AREA_END:APP_AREA_END + len(block2)] = block2
+    flash2 = bytes(flash2)
+
+    # checks
+    back = bytearray(flash2)                                                # what the CPU reads: decrypted below 0x93000
+    pk.sfc(back, 0x4000, APP_AREA_END - 0x4000, 0x4000, pk.KEY)
+    at = 0x4000 + 0x120 + desc_at                                           # app.bin starts 0x120 into the app area
+    got_desc = bytes(back[at:at + DESC_LEN])
+    b1 = bytes(back[at + DESC_LEN:at + DESC_LEN + split])
+    b2 = bytes(back[APP_AREA_END:APP_AREA_END + len(block2)])
+    if got_desc != desc or b1 + b2 != whx:
+        raise SystemExit("pack: the data does not read back")
+    if struct.unpack_from("<I", desc, 16)[0] != pk.crc16(b1) or struct.unpack_from("<I", desc, 24)[0] != pk.crc16(b2):
+        raise SystemExit("pack: descriptor checksums")
+    hits = record_lookalikes(flash2)
+    if hits:
+        raise SystemExit(f"pack: game data looks like an update record at {[hex(h) for h in hits]}: change the data")
+    if flash2[:APP_AREA_END] != flash1:
+        raise SystemExit("pack: the two packages' app areas differ")
+    print(f"  ok    descriptor at XIP {APP_XIP + desc_at:#x}; block 1 {split} B in the app slot ({room - split} B spare); "
+          f"block 2 {len(block2)} B at {APP_AREA_END:#x} ({DATA_END - APP_AREA_END - len(block2)} B spare)")
+    print("  ok    both blocks read back to the original file; checksums as the firmware computes them")
+    print("  ok    no 4 KB boundary in the data region looks like an update record")
+    ext_ota = doom_loader()
+    p1, p2 = pk.ufw(flash1, felucca_ota, "FM-1_900"), pk.ufw(flash2, ext_ota, "FM-1_900")
+    (OUT / "doom_part1.fwsc").write_bytes(p1)
+    (OUT / "doom_full.fwsc").write_bytes(p2)
+    print(f"doom_part1.fwsc  {len(p1)} B   Felucca layout, Felucca loader, data block 1; writes nothing above {APP_AREA_END:#x}")
+    print(f"doom_full.fwsc   {len(p2)} B   the same app area + data block 2; loader variant ({len(ext_ota)} B)")
+    print("NOT TESTED ON HARDWARE - do not install without review")
 
 
 if __name__ == "__main__":
