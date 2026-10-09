@@ -774,3 +774,23 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   `https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc` (the link on M-VAVE's
   download page). VERIFIED: 699,956 B, SHA-256 `db1642b2…edb8a` = official V15. Copy kept at
   `refs/FM-1-V15-official.fwsc` (not in git).
+- 2026-10-09 ~13:45: Sean installed `FM-1.fwsc` (official V15) from Baud Girl's Install page ("Install a file
+  from my computer"). VERIFIED by Sean's report: it finished and the FM-1 restarted into stock firmware. So
+  Baud Girl → stock works on this unit, and the M-VAVE loader path is proven here.
+
+### Felucca moved on: 1.5 was released today (VERIFIED, `git fetch --tags`, hosted installer page)
+- Tags after our checkout (`v1.1.5`): `v1.1.5.1`, `v1.4`, `v1.4.1`, `v1.5` (5 commits). The hosted installer
+  (`https://hugelton.github.io/Felucca/` → `webapp/installer/`) has one Install button and installs
+  `felucca-1.5.fwsc`; no version choice.
+- `git diff v1.1.5 origin/HEAD` for the update path: `firmware/loader/` unchanged; `tools/fm1pkg_make.py`,
+  `tools/fm1_install.py`, `web/fm1ota.js`, `web/fm1pkg.js` unchanged; `firmware/src/ota.c` changed only in
+  where three buffers are placed (a `.pool` section attribute), no logic; `fm1_flash.h` adds one store
+  region, `0xE7000–0xE8000` (FM6 voice bank, 1.4.1). RAM split changed (72 K / 360 K).
+- ASSUMED until checked: the published 1.5 loader is still byte-identical to the one in our packages, and
+  1.5's update entry accepts our packages as 1.1.5's does. TODO before the `doom_code` step: build or fetch
+  1.5 and re-run `firmware/test.sh` against it.
+- Our firmware stays on the v1.1.5 copies of `ota.c` / `fm1_flash.h` (1.5's `ota.c` needs a `.pool` section).
+- Preset warning for the Felucca step: Felucca's store is `0x97000–0xE0000`, which stock uses for its own
+  saved data (exact place of stock presets ASSUMED to be inside it). Expect presets saved on the FM-1 to be
+  lost from here on; the copy is `~/Downloads/fm1-presets-2026-10-09.syx`, restorable only with Baud Girl's
+  firmware and Device Manager.
