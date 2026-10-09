@@ -30,3 +30,5 @@ tiny.whd.h
 .DS_Store
 /refs/
 /jl-uboot-tool/
+/tools/venv/
+/backups/

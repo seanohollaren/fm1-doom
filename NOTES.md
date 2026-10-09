@@ -813,3 +813,32 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   started and its USB answered. Preview entry `fm1-install` (port 8792). NOT served yet; needs Sean's yes.
 - STILL MISSING for the brief's precondition ("working recovery path and a full flash backup before the
   first experimental flash"): no boot-mode tool on hand, no flash dump. Put to Sean as a decision.
+
+## 2026-10-09 — Decision: prove a boot-mode backup/recovery channel before `doom_code` (Sean: "go with your recommendation", priority = recoverability)
+
+- Chosen: build a Mac boot-mode tool first (option C), not install `doom_code` now. Reason: a failed first
+  boot ends in the chip's boot mode; the tool would be needed then anyway, with no backup and a dead unit.
+  Sean's go-ahead is taken as the approval CLAUDE.md requires for using jl-uboot-tool's RAM loader.
+- VERIFIED from FM-1 Transporter (`docs/PROTOCOL.md`, `src/jieli_uboot.c`, hardware-verified by its author):
+  the full protocol. ROM `UBOOT1.00`: WRITE_MEMORY `FB06`, JUMP `FB08`. Upload `wl82loader.bin` (24,064 B,
+  already ciphered, sent raw in 512 B blocks) to `0x1C02000`, `JUMP(0x1C02000, 1)`. Loader: READ_KEY `FC09`
+  (expect `0x980F`), GET_ONLINE_DEVICE `FC0A` (type 3, id `0x856014`), GET_USB_BUFF_SIZE `FC14`, READ_FLASH
+  `FD05`, ERASE_SECTOR `FB01`, WRITE_FLASH `FB04`, RUN_APP `FC0C`. The ROM waits indefinitely while idle; the
+  loader resets the chip ~3 s after the last command and the firmware boots. The author's first Mac flow
+  used pyusb, so a Mac host is known to be possible.
+- Installed on the Mac: Homebrew `libusb` 1.0.30; `tools/venv` (Python venv, not in git) with `pyusb` 1.3.1
+  and `crcmod` (test cross-check only).
+- New: `tools/fm1boot.py` (`selftest`, `probe`, `info`, `dump`). READ-ONLY: it holds an allow-list of six
+  commands (RAM loader upload, jump, three queries, flash read) and refuses any other opcode; no erase or
+  flash-write opcode is in the file. `dump` reads the 1 MiB twice, requires the reads to be identical, saves
+  to `backups/` (not in git) with a SHA-256, and logs to `backups/fm1boot.log`.
+- VERIFIED on the Mac: `selftest` passes (CRC and cipher equal jl-uboot-tool's own code; a simulated FM-1
+  that asserts on any unexpected command; wrong chip key / flash id stop before any read; one flipped bit in
+  the second read is refused). The libusb calls for finding a device, walking descriptors and asking about
+  macOS's driver work without root (tried on the FM-1 as it runs Felucca: it is `1209:0001` "Felucca", with
+  audio, MIDI and a CDC serial interface).
+- NOT VERIFIED (needs the FM-1 in boot mode): taking the device over from macOS's mass-storage driver (needs
+  root; libusb re-enumerates the device to do it, and the ROM's reaction is unknown), and every bulk
+  transfer. A failure there leaves the FM-1 in boot mode; switching it off and on returns it to Felucca.
+- Residual risk the tool does not cover: a firmware that dies before its own boot guard runs never reaches
+  boot mode by itself; only the Transporter's power-on key (XIAO hardware) gets in then.
