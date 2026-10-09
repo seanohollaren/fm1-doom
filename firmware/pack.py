@@ -73,7 +73,10 @@ def app_image():
 
 
 def split_point(whx, room):
-    """the largest lump boundary that leaves block 1 no longer than room"""
+    """The split depends on the data file alone, never on the firmware's size: the FIRST lump boundary at which
+    block 2 fits its region [0x93000, 0xE0000). Block 2 is then as long as it can be and stays byte-identical
+    across firmware builds (it is written from the Mac in boot mode; a firmware update over USB only rewrites
+    the app slot), and block 1 is as short as it can be, which leaves the firmware the most room to grow."""
     if whx[:4] != b"IWHX":
         raise SystemExit("pack: not a WHX file")
     n, table = struct.unpack_from("<ii", whx, 4)
@@ -82,10 +85,13 @@ def split_point(whx, room):
         raise SystemExit("pack: unexpected WHX directory")
     if len(whx) <= room:
         return len(whx)
-    fit = [o for o in offs if o <= room]
-    if not fit or fit[-1] <= table + 4 * (n + 1):
-        raise SystemExit("pack: no room for even the data file's directory in the app slot")
-    return fit[-1]
+    fit = [o for o in offs if len(whx) - o <= DATA_END - APP_AREA_END and o > table + 4 * (n + 1)]
+    if not fit:
+        raise SystemExit("pack: the data file's second block cannot fit its region")
+    if fit[0] > room:
+        raise SystemExit(f"pack: block 1 needs {fit[0]} B but the app slot has {room} B left after the firmware "
+                         f"({fit[0] - room} B too many): the firmware must shrink or the data must")
+    return fit[0]
 
 
 def descriptor(whx, split):

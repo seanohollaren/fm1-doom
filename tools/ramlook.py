@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """ramlook.py RAM.bin [BUILD_DIR]: read a RAM snapshot taken with `fm1boot.py ramdump` using the symbols of
-the firmware that was running (default BUILD_DIR: firmware/installed_e58934d4). Mac only; nothing here talks
+the firmware that was running (default BUILD_DIR: the newest firmware/installed_* directory). Mac only; nothing here talks
 to the device.
 
 Prints the boot guard, the crash record (with the function each address falls in), the game / video state,
@@ -69,7 +69,7 @@ def main(argv):
         return 2
     dump = Path(argv[1])
     ram = dump.read_bytes()
-    build = Path(argv[2]) if len(argv) > 2 else ROOT / "firmware" / "installed_e58934d4"
+    build = Path(argv[2]) if len(argv) > 2 else max((ROOT / "firmware").glob("installed_*"), key=lambda d: d.stat().st_mtime)
     syms, funcs = load_syms(build / "doom.syms")
     print(f"{dump.name}: {len(ram)} B; symbols from {build.name} (core id {(build / 'core.id').read_text().strip()})")
     ranges = None

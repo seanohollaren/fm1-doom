@@ -1062,3 +1062,43 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   addresses and kept nothing. Fixed: `ramdump` now reads the most useful ranges first (`.noinit`, `.data/.bss`,
   video state, frame buffers, heap, the rest), logs every block with its time to `backups/fm1boot.log`, and
   saves whatever was read plus a `.ranges` file; `ramlook.py` honours it.
+
+## 2026-10-09 ~16:30 — ROOT CAUSE of the frozen picture and the level-start crash: stale objects (my build scripts)
+
+- VERIFIED from the RAM snapshot (`backups/fm1-ram-20261009-154945.bin`, read with `tools/ramlook.py`):
+  - the second `ramdump` read 471,552 of 524,288 B and then failed at `0x01C01000`, the first stack guard
+    band: reading a guard band through the boot ROM resets the chip (our guard registers evidently survive
+    the reset into the ROM). Everything except `0x01C01000–0x01C0A000` and the top was read.
+  - at the "frozen" title: `fm1_frames` = 5433 in 287 s (≈19 presents per second), `menuactive` = 1, video
+    type SINGLE, both overlay lists hold 4 well-formed menu entries, palettes fine; the two frame buffers hold
+    exactly the title picture. So the game ran and presented; only the overlay graphics drew nothing.
+  - crash record: bus-invalid access (`dbg` bit 20) at `draw_regular_columns`, uptime 61 s.
+  - `whd_vpatch_numbers` = `0x020AB4AC` = block-1 base + file offset `0x6AD6C`, i.e. the address of lump
+    526 (`P_START`, in block 2) computed WITHOUT the two-block translation; `stbar` pointed outside the flash.
+- CAUSE: `firmware/build_in.sh` and `web/build.sh` recompiled a source only when that source was newer than
+  its object, with no regard for headers. The two-block `lump_data()` lives in `w_wad.h` (changed 12:55);
+  102 of 111 engine objects were older. The installed build references `whd_split` in 4 places; a full
+  rebuild references it in 48. Block-2 lumps read from stale objects came from 3,904 bytes too low.
+- CONSEQUENCE for earlier entries in this file: every "VERIFIED" statement about the GAME made between the
+  two-block change (2026-10-09 morning) and now was made on partly stale builds, including "the browser build
+  stores the two blocks far apart … same result" (the headless test checks game logic, not pictures). The
+  recovery core was not affected: `doom_dev.c`, `crt0`, vectors and interrupt stubs are compiled on every
+  build, and its id is unchanged by the full rebuild (`e58934d4e5968ae4`).
+- FIX: both scripts now recompile everything whenever any header, the define list, the linker script or the
+  script itself is newer than the last complete build.
+- VERIFIED after a full rebuild of the browser build: headless test unchanged (awake 2, health 25 at t=13);
+  in the browser: title, then the menu drawn over it ("New Game", "Options"), then E1M1 with the status bar.
+- Full firmware rebuild: `.text` 0x3F2E4 (+1.4 KB), other sections unchanged, 0 stale objects.
+
+### Split point no longer depends on the firmware (firmware/pack.py)
+- The split is now the first lump boundary at which block 2 fits `[0x93000, 0xE0000)`: 294,980. Block 2 is
+  312,348 B (3,044 B spare) and depends on the data file alone; block 1 is 294,980 B and the app slot has
+  21,208 B spare for firmware growth. Later firmware updates over USB will not need block 2 rewritten.
+- Build to install next (NOT installed yet): firmware 265,288 B; `doom_part1.fwsc` SHA-256
+  `f82c2608a45307bd09064b6c1379be26baf689c10525c87f651863905978524f`; `doom_full.fwsc` (source of block 2
+  only) SHA-256 `365e7e0b6816f1540cfd73c5c73206d591b5cf213d0e55a5823f5f2b914659ce`. All 15 package tests and
+  Felucca 1.5's update test pass. Predicted flash after both steps passes `check_dump.py` and the replayed
+  start-up check; no update-record lookalikes. After the USB install alone, block 2's checksum fails (old
+  block 2 in place), so the FM-1 will show the two-square blue screen until the data write.
+- Symbols of this build: `firmware/installed_f82c2608/`. Installer page: `firmware/build/site_b2`, preview
+  entry `fm1-install-b2`, port 8794.
