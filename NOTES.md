@@ -842,3 +842,31 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   transfer. A failure there leaves the FM-1 in boot mode; switching it off and on returns it to Felucca.
 - Residual risk the tool does not cover: a firmware that dies before its own boot guard runs never reaches
   boot mode by itself; only the Transporter's power-on key (XIAO hardware) gets in then.
+
+## 2026-10-09 14:19 — First full flash backup, taken from the Mac over the ordinary USB cable (VERIFIED on the device)
+
+- Sean held OCT- + OCT+ on Felucca 1.5 → boot mode. The Mac saw `4C4A:8057` "WL80UBOOT1.00", one
+  mass-storage interface (class 08/06/50), bulk IN `81`, bulk OUT `01`, macOS's driver attached.
+- `sudo tools/venv/bin/python tools/fm1boot.py dump` worked first time: libusb took the device over (as root;
+  the ROM survived the re-enumeration), INQUIRY "WL82" / "UBOOT1.00" / "1.00" (first attempt timed out, second
+  answered), loader uploaded and running, loader USB buffer 32768 B, chip key `980F`, device type 3, flash id
+  `856014`, two reads of 1 MiB identical (1.7 s each).
+  File: `backups/fm1-flash-20261009-141944.bin`, SHA-256
+  `46955e8d086d1d595df474e0fe0e36bce272b07793ee456014b4070a313e655a`.
+- macOS asked twice: "allow accessory to connect" when the FM-1 entered boot mode, and "iTerm would like to
+  access files on a removable volume" while libusb took the device over (the call blocked ~5 min on it).
+  Both must be allowed. macOS did not mount anything and showed no "unreadable disk" dialog.
+- After the tool finished the FM-1 restarted into Felucca by itself (seen on USB as `1209:0001` "Felucca").
+- `tools/check_dump.py` (new; Mac only) on the backup: flash header and all four head entries checksum; chip
+  key stored in the image is `980F`; app-area head, app-area data, `app.bin` (491,692 B used of 581,564,
+  identity `FM-1_915` = Felucca 1.5) and `cfg_tool.bin` all checksum; no update record pending. The head
+  `[0, 0x4000)` is byte-identical to the head inside M-VAVE's official V15 package.
+- Flash use on this unit now: `0x93000–0xE5000` entirely blank (gap, Felucca's store, update staging);
+  `0xE5000–0xE7000` Felucca autosave; `0xE8000–0xFC000` holds data in 19 of 20 sectors, with DX7-style voice
+  names ("PIANO 1", "ORGAN 1", "SYN LEAD 1" …): the stock firmware's preset store. Felucca never writes
+  there and neither do our packages (`doom_full` writes `[0x93000, 0xE0000)`), so the earlier warning that
+  presets would be lost was too pessimistic: they are still on the device (ASSUMED to be what stock / Baud
+  Girl will read back) and in this backup.
+- Reminder from the boot-flow notes: after a power cycle the SPL looks for an update record at every
+  "4 KB boundary minus 256" between `0x93000` and `0xFC000`. Any test write in that range must leave the last
+  256 bytes of its sector blank.
