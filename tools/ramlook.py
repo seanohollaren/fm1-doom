@@ -72,6 +72,15 @@ def main(argv):
     build = Path(argv[2]) if len(argv) > 2 else ROOT / "firmware" / "installed_e58934d4"
     syms, funcs = load_syms(build / "doom.syms")
     print(f"{dump.name}: {len(ram)} B; symbols from {build.name} (core id {(build / 'core.id').read_text().strip()})")
+    ranges = None
+    side = Path(str(dump) + ".ranges")
+    if side.exists():
+        ranges = [tuple(int(x, 16) for x in ln.split()) for ln in side.read_text().splitlines() if ln.strip()]
+        print("  ranges actually read: " + ", ".join(f"{lo:08X}-{hi:08X}" for lo, hi in sorted(ranges)) +
+              f"  ({sum(hi - lo for lo, hi in ranges)} B); everything else in the file is zero filler")
+
+    def have(addr, n):
+        return ranges is None or any(lo <= addr and addr + n <= hi for lo, hi in ranges)
 
     def mem(addr, n):
         return ram[addr - BASE:addr - BASE + n]
@@ -81,6 +90,8 @@ def main(argv):
             return None
         addr, size = syms[name]
         size = size if size in (1, 2, 4) else 4
+        if not have(addr, size):
+            return None
         return int.from_bytes(mem(addr, size), "little", signed=signed)
 
     # --- is this a believable snapshot of that firmware?

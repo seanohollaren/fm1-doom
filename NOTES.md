@@ -1054,3 +1054,11 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   `firmware/installed_e58934d4/` (not in git) so later rebuilds cannot lose them.
 - ASSUMED until seen: that the ROM answers READ_MEMORY for the whole RAM range and that the game's RAM is
   still there after the reset into the ROM (the ROM uses some RAM of its own).
+- 2026-10-09 ~16:20, first `ramdump` on the device: the chord from game mode turned the screen dark (so the
+  LCD still takes new pictures while the title is "frozen": the game is not presenting, the panel is fine).
+  The RAM read itself STOPPED 0.65 s after INQUIRY with an I/O error, and the FM-1 was then found running
+  our firmware again (`1209:0001`): the chip reset while the boot ROM was answering READ_MEMORY. Unknown
+  whether a particular address or the time spent does it; the first version read bottom-to-top, logged no
+  addresses and kept nothing. Fixed: `ramdump` now reads the most useful ranges first (`.noinit`, `.data/.bss`,
+  video state, frame buffers, heap, the rest), logs every block with its time to `backups/fm1boot.log`, and
+  saves whatever was read plus a `.ranges` file; `ramlook.py` honours it.

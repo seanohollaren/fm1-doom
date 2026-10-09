@@ -48,6 +48,17 @@ CMD_WRITE_MEMORY = 0xFB06        # RAM only; used for the loader upload and noth
 CMD_JUMP = 0xFB08
 CMD_READ_MEMORY = 0xFD07         # RAM read, boot ROM stage only (tools/ramlook.py reads the result)
 RAM_LO, RAM_HI = 0x01C00000, 0x01C80000
+RAM_PLAN = [                        # most useful first (addresses: the Doom firmware's map, firmware/doom.ld)
+    (0x01C7C000, 0x01C7C200),       # .noinit: crash record, boot guard
+    (0x01C3C000, 0x01C43000),       # .data / .bss: game state
+    (0x01C0A000, 0x01C0B600),       # palette, LCD strip buffers, video state
+    (0x01C25800, 0x01C25A00),       # renderer state
+    (0x01C0B600, 0x01C25800),       # the two frame buffers
+    (0x01C43000, 0x01C7C000),       # heap
+    (0x01C25A00, 0x01C3C000),       # the rest of the big zero-initialised region
+    (0x01C00000, 0x01C0A000),       # RAM-resident code, stacks
+    (0x01C7C200, 0x01C80000),       # reserved top: mailbox, vectors
+]
 # LoaderV2 (after the jump)
 CMD_READ_FLASH = 0xFD05
 CMD_READ_KEY = 0xFC09
@@ -158,16 +169,30 @@ class Fm1Boot:
             raise Fm1Error(f"RAM read {addr:08X}+{n} returned {len(d)} bytes")
         return crc_cipher(d)                     # the ROM ciphers every memory transfer
 
-    def ramdump(self):
+    def ramdump(self, plan=None):
+        """Returns (image, ranges read, error or None). The most useful ranges go first: on the first run the
+        chip reset part way through a plain bottom-to-top read, and whatever was read by then must be kept."""
         v, p, _ = self.inquiry()
         if v != "WL82" or not p.startswith("UBOOT1"):
             raise Fm1Error(f'not the WL82 boot ROM ("{v}" / "{p}"); nothing read')
-        t0, out = time.time(), bytearray()
-        for addr in range(RAM_LO, RAM_HI, IO):
-            out += self.read_ram(addr, IO)
-        self.log(f"RAM {RAM_LO:08X}-{RAM_HI:08X}: {len(out)} B in {time.time() - t0:.1f} s, "
-                 f"sha256 {hashlib.sha256(out).hexdigest()[:16]}")
-        return bytes(out)
+        t0, out, done, err = time.time(), bytearray(RAM_HI - RAM_LO), [], None
+        for lo, hi in plan or RAM_PLAN:
+            a = lo
+            try:
+                for a in range(lo, hi, IO):
+                    n = min(IO, hi - a)
+                    self.log(f"ram {a:08X}+{n} at {time.time() - t0:.3f} s", show=False)
+                    out[a - RAM_LO:a - RAM_LO + n] = self.read_ram(a, n)
+                    a += n
+            except Fm1Error as e:
+                err = f"RAM read failed at {a:08X}, {time.time() - t0:.3f} s after the first read: {e}"
+            if a > lo:
+                done.append((lo, a if err else hi))
+            if err:
+                self.log(err)
+                break
+            self.log(f"RAM {lo:08X}-{hi:08X} read ({time.time() - t0:.2f} s)")
+        return bytes(out), done, err
 
     def start_loader(self, blob):
         if self.loader_running:
@@ -479,7 +504,21 @@ def selftest():
     ram = bytes(random.Random(3).randrange(256) for _ in range(RAM_HI - RAM_LO))
     sim = SimFm1(image, loader, ram=ram)
     p = Fm1Boot(sim, silent)
-    check("RAM dump equals the simulated RAM", p.ramdump() == ram)
+    got, done, err = p.ramdump()
+    check("RAM dump equals the simulated RAM, every range read once", got == ram and err is None and
+          sorted(done)[0][0] == RAM_LO and sum(hi - lo for lo, hi in done) == RAM_HI - RAM_LO and
+          all(a[1] == b[0] for a, b in zip(sorted(done), sorted(done)[1:])))
+
+    class Dies(SimFm1):
+        def bot(self, cb, n_in=0, out=b"", timeout_ms=3000):
+            if len(cb) == 16 and cb[:2] == b"\xfd\x07" and struct.unpack(">I", bytes(cb[2:6]))[0] == 0x01C0A400:
+                raise Fm1Error("simulated reset")
+            return super().bot(cb, n_in, out, timeout_ms)
+    got, done, err = Fm1Boot(Dies(image, loader, ram=ram), silent).ramdump()
+    check("a reset part way: the ranges read before it are kept and reported",
+          err is not None and "01C0A400" in err and done[0] == (0x01C7C000, 0x01C7C200) and
+          done[-1] == (0x01C0A000, 0x01C0A400) and got[0x7C000:0x7C200] == ram[0x7C000:0x7C200] and
+          got[0xA000:0xA400] == ram[0xA000:0xA400] and got[0xA400:0xA600] == bytes(0x200))
     p.start_loader(loader)
     try:
         p.read_ram(RAM_LO, 16)
@@ -542,13 +581,18 @@ def main(argv):
             p = Fm1Boot(t, log)
             t.wait_ready(p)
             if argv[1] == "ramdump":
-                ram = p.ramdump()
+                ram, done, err = p.ramdump()
                 out = Path(argv[2]) if len(argv) > 2 else backups / f"fm1-ram-{time.strftime('%Y%m%d-%H%M%S')}.bin"
                 if out.exists():
                     raise Fm1Error(f"{out} exists; not overwriting")
                 out.write_bytes(ram)
+                Path(str(out) + ".ranges").write_text("".join(f"{lo:08X} {hi:08X}\n" for lo, hi in done))
                 give_back(out)
-                log(f"saved {out} ({len(ram)} B)")
+                give_back(Path(str(out) + ".ranges"))
+                log(f"saved {out}: {sum(hi - lo for lo, hi in done)} of {len(ram)} B read "
+                    f"({len(done)} ranges, listed in {out.name}.ranges)")
+                if err:
+                    raise Fm1Error("the RAM read stopped early; what was read is saved")
             p.start_loader(loader)
             p.require_fm1()
             if argv[1] == "dump":
