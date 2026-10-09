@@ -1022,3 +1022,15 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   pin the split point (so later firmware updates do not need block 2 rewritten) and read the volume knob.
   Until then the output level is fixed at what Felucca calls full volume.
 - `doom_full.fwsc` SHA-256: `8838842ad73243136f521078d59efe6b4a021a268491f4c8a9bc75d49dcd23d7`
+
+## 2026-10-09 ~15:55 — FIRST RUN OF THE GAME ON THE FM-1 (VERIFIED on the device, by Sean's report)
+
+- Sean ran `sudo tools/venv/bin/python tools/fm1restore.py data firmware/build/doom_full.fwsc --write` from
+  boot mode; the FM-1 restarted into game mode.
+- Seen: the DOOM title screen; an "intro sound" played; pressing keys produces sound effects.
+- So on hardware: both data blocks pass their checksums; the engine initialises (zone heap, WHX data from both
+  blocks, OPL / sound); the title picture goes through the whole video path (8-bit frame → RGB565 → squeeze →
+  LCD strips by DMA); audio comes out of the codec; the key matrix reaches the game.
+- PROBLEM: the picture does not change after the title appears, although key presses produce menu sounds.
+  Unknown yet whether the picture is frozen (game running blind) or only the menu overlay is missing.
+  The present path and the main loop are the same code as the browser build, which shows the menu.
