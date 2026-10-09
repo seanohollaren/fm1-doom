@@ -21,7 +21,16 @@
  *
  * Ways out that need nothing from the game: USB update (web installer / fm1_install.py) in either mode;
  * OCT- + OCT+ held 5 s -> mask-ROM UBOOT; USB SysEx F0 22 24 35 7D F7 -> UBOOT; three failed starts in a row
- * (i.e. safe mode itself keeps dying) -> UBOOT. In safe mode, PLAY held 2 s forgets the failure and restarts.
+ * (i.e. safe mode itself keeps dying) -> UBOOT. On the amber screen, PLAY pressed and held 2 s forgets the
+ * failure and restarts (a key that reads as stuck down from the start does nothing).
+ *
+ * Safe mode does not trust itself. Until a host has completed the update protocol's handshake over USB-MIDI
+ * (proof that enumeration, MIDI receive and our reply all work) it counts as unreachable:
+ *   - the watchdog is fed only while the millisecond tick advances, so a dead tick interrupt ends in a reset;
+ *   - a reset before the handshake counts as a failed start (three -> UBOOT), however long the start lasted;
+ *   - DEV_DEADMAN_MS after power-on without a handshake it enters UBOOT by itself, where tools/fm1boot.py and
+ *     tools/fm1restore.py reach it over the same cable. A bar along the bottom of the screen shows the time
+ *     left; it turns green once a host has been heard.
  *
  * NOT YET RUN ON HARDWARE. */
 #include <stdint.h>
@@ -67,6 +76,8 @@ int main(void);
 
 enum { MODE_GAME, SAFE_FAILED, SAFE_KEY, SAFE_NODATA, SAFE_PART2 };
 static uint8_t dev_mode;
+static uint8_t dev_host_seen;            /* a host completed the update handshake during this start */
+#define DEV_DEADMAN_MS 180000u           /* safe mode without a handshake: UBOOT after this long */
 static uint8_t flash_ok;                 /* the expected 1 MiB part answered (as Felucca's persist_boot) */
 
 /* ------------------------------------------------------------------ flash (as Felucca's storage_hw.c) --- */
@@ -117,28 +128,43 @@ static void audio_silence(void)
 }
 
 /* ------------------------------------------------------------------ 10 kHz tick (as Felucca's main.c) --- */
+static uint32_t tick_last;               /* TIMER4 count at the previous tick; set when the tick is started, so
+                                          * fm1_ms counts from our own start even if TIMER4 was left running */
 void fm1_timer5_irq(void)
 {
-    static uint32_t sub, last, acc;
+    static uint32_t sub, acc;
     uint32_t t0 = fm1_ticks();
     fm1_timer5_ack();
     fm1_input_tick();
-    acc += t0 - last;
-    last = t0;
+    acc += t0 - tick_last;
+    tick_last = t0;
     while (acc >= 1000u * FM1_TICKS_PER_US) {
         acc -= 1000u * FM1_TICKS_PER_US;
         fm1_ms++;
     }
-    if (sub % 5u == 0u)
+    if (sub % 5u == 0u) {
         usb_poll();                      /* 2 kHz: all USB traffic */
+        mi_r = mi_w;                     /* MIDI notes / clock from the host: dropped. Felucca's audio interrupt
+                                          * empties this ring; if nobody did, usb.c would stop accepting EP1 OUT
+                                          * packets once it filled, and the update SysEx with them */
+        midi_in_overflow = 0;
+    }
     if (++sub == 10u)
         sub = 0;
 }
 extern void isr_timer5(void);
 
 /* ------------------------------------------------------------------ update entry hooks (as ota_hw.c) --- */
+static void dev_feed(void)               /* only a running tick interrupt keeps the watchdog quiet */
+{
+    static uint32_t fed_ms;
+    if (fm1_ms != fed_ms) {
+        fed_ms = fm1_ms;
+        fm1_wdt_feed();
+    }
+}
 static uint32_t ota_now_ms(void) { return fm1_ms; }
-static void ota_idle(void) { fm1_wdt_feed(); }
+static void ota_idle(void) { dev_feed(); }
 #define DEV_OTA_AREA 0x000E0000u
 #define DEV_OTA_LEN 0x5000u
 static int ota_in_area(uint32_t off, uint32_t n) { return FL_IN(off, n, DEV_OTA_AREA, DEV_OTA_AREA + DEV_OTA_LEN); }
@@ -221,20 +247,30 @@ static void dev_service(void)
 {
     static uint32_t both_t0;
     uint32_t both = (1u << DEV_BTN[FM1_BTN_OCTDN]) | (1u << DEV_BTN[FM1_BTN_OCTUP]);
-    fm1_wdt_feed();
+    dev_feed();
     usb_retry(fm1_ms);
-    if (fm1_ms > 30000u && bootguard.pending) {
-        bootguard.pending = 0;           /* this start survived its first 30 s */
-        if (dev_mode == MODE_GAME)
-            bootguard.failed = 0;        /* (safe mode keeps the count: it stays in safe mode across resets) */
-    }
+    if (dev_mode == MODE_GAME) {
+        if (fm1_ms > 30000u && bootguard.pending) {
+            bootguard.pending = 0;       /* this start survived its first 30 s (as Felucca) */
+            bootguard.failed = 0;
+        }
+    } else if (dev_host_seen)
+        bootguard.pending = 0;           /* safe mode: reachable only once a host was heard; the failure count is
+                                          * kept, so it stays in safe mode across resets */
     if ((fm1_in.buttons & both) != both)
         both_t0 = fm1_ms;
     else if (fm1_ms - both_t0 > 5000u)
         dev_enter_uboot();               /* OCT- + OCT+ held 5 s */
-    ota_service();                       /* update handshake */
+    {                                    /* update handshake (ota.c ota_service, plus the note that a host is there) */
+        uint32_t d = ota_take();
+        if (d == 7u && ota_dec[2] == 0x11) {
+            ota_reply_identity();
+            dev_host_seen = 1;
+        }
+    }
     if (usb.ota_req) {                   /* the host starts an update */
         usb.ota_req = 0;
+        dev_host_seen = 1;
         audio_silence();
         ota_session();                   /* returns only if nothing was committed */
         if (dev_mode == MODE_GAME)
@@ -406,18 +442,38 @@ void fm1_cstart(void)
         fm1_audio_init(abuf, HALF_WORDS, isr_alnk0, 3);
     }
     usb_start();
+    tick_last = fm1_ticks();
     fm1_timer5_start(isr_timer5, 4);
     fm1_guard_lock_top();
     fm1_irq_enable_all();
 
     if (dev_mode != MODE_GAME) {         /* SAFE MODE: updatable, nothing else */
-        uint32_t play_t0 = fm1_ms;
+        uint32_t t_safe = fm1_ms, play_t0 = 0, play_armed = 0, bar_s = 0xFFFFFFFFu;
         dev_mode_screen();
         for (;;) {
+            uint32_t now = fm1_ms - t_safe;      /* ms in safe mode */
             dev_service();
-            if (!(fm1_in.buttons & (1u << DEV_BTN[FM1_BTN_PLAY])))
-                play_t0 = fm1_ms;
-            else if (fm1_ms - play_t0 > 2000u) {   /* PLAY held 2 s: forget the failure, start again */
+            if (!dev_host_seen && now > DEV_DEADMAN_MS)
+                dev_enter_uboot();       /* nobody reached us over USB: the mask ROM can be reached */
+            if (now / 1000u != bar_s) {  /* once a second: time left (white), or green = a host was heard */
+                uint32_t w = dev_host_seen || now >= DEV_DEADMAN_MS ? 0u : 240u - now / (DEV_DEADMAN_MS / 240u);
+                bar_s = now / 1000u;
+                if (w > 240u)
+                    w = 240u;
+                if (dev_host_seen)
+                    lcd_fill(0, 232, 240, 8, 0x07E0);
+                else {
+                    if (w)
+                        lcd_fill(0, 232, w, 8, 0xFFFF);
+                    if (w < 240u)
+                        lcd_fill(w, 232, 240u - w, 8, 0x0000);
+                }
+            }
+            if (!(fm1_in.buttons & (1u << DEV_BTN[FM1_BTN_PLAY]))) {
+                play_t0 = now;
+                play_armed = 1;                  /* seen released: a key stuck down can never do the restart below */
+            } else if (dev_mode == SAFE_FAILED && play_armed && now - play_t0 > 2000u) {
+                /* PLAY pressed and held 2 s after a failed start: forget the failure, start again */
                 bootguard.failed = 0;
                 bootguard.pending = 0;
                 usb_detach();

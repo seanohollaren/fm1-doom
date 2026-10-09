@@ -895,3 +895,61 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   the whole app area from the Mac) for certain, to protect against needing it with maybe 30–40 %
   probability. The blank-sector test proves the command path without putting anything bootable at risk.
 - Process note: I do not run write-capable device commands myself; Sean runs them after seeing the command.
+
+## 2026-10-09 ~14:30 — Write direction proven on the device; firmware hardened; independent review
+
+- VERIFIED on the device: `sudo tools/venv/bin/python tools/fm1restore.py sectortest backups/fm1-flash-20261009-141944.bin`
+  (run by Sean): sector `0x95000` erased, programmed with the test pattern, read back, erased, blank again;
+  neighbours unchanged; full read afterwards has the same SHA-256 as the backup (`46955e8d…`). The takeover
+  from macOS's driver took 1.5 s this time (the 5 min before was the permission prompt). So: full backup +
+  a tested way to erase/program/verify from the Mac in boot mode. The brief's precondition is met as far as
+  a host tool can meet it.
+
+### Safe mode no longer trusts itself (firmware/doom_dev.c)
+- A host counts as "heard" only when it completes the update handshake (`ota_take` → identity reply) or
+  sends the upgrade command. Until then, in safe mode: a reset counts as a failed start however long the
+  start lasted (three → boot ROM); after `DEV_DEADMAN_MS` = 180 s it enters the boot ROM by itself; a bar
+  along the bottom of the screen shows the time left and turns green once a host was heard.
+- The watchdog is fed only while the millisecond tick advances (also inside update sessions).
+
+### Independent review of the recovery core (a separate agent, read-only, given code and not conclusions)
+No blocker. Three risks, all fixed and confirmed in the new disassembly:
+1. **USB-MIDI receive would have gone deaf after ~41 ordinary MIDI messages.** `usb.c` refuses EP1 OUT
+   packets when its MIDI-in ring is nearly full; Felucca's audio interrupt empties that ring, ours never did.
+   Any host sending notes or MIDI clock to the port would have blocked the update SysEx until a reset.
+   Fix: the tick interrupt empties the ring after every USB poll (`mi_r = mi_w`).
+2. **"PLAY held 2 s" could loop for ever** if PLAY read as stuck down (it cleared the failure count and
+   rebooted before any safety net). Fix: only on the amber screen, and only after PLAY was seen released.
+3. **`fm1_ms` could start anywhere in 0–179 s** if TIMER4 is left running across the loader's reset (the first
+   tick added the whole count), so the 180 s timeout could have fired after ~1 s. Fix: the tick's reference
+   is taken when the tick starts, and the timeout is measured from entering safe mode.
+- Confirmed consistent with Felucca by the review: `_start` at `0x02000120`, first in the image; `crt0`
+  identical apart from the two stack values; the top of `fm1_cstart` (TIMER4, reset reason, watchdog, boot
+  guard) matches Felucca's instruction for instruction; initialisation order; guard ranges; section sizes and
+  alignment (`.bigbss` has 700 B spare); `.ram_text` byte-identical to Felucca's; all 128 vectors point at
+  fatal stubs and only TIMER5 is enabled in safe mode; the MIDI-only USB descriptors are the ones Felucca's
+  loader uses; the update hooks and `ota_commit` match Felucca's step for step.
+- Not verifiable from files (ASSUMED): whether the chip's guard registers and TIMER4 survive a reset; the
+  SPL's behaviour with an application it cannot start; Felucca 1.5's `.noinit` layout (ours has the boot
+  guard at `0x01C7C040`; a stale value there shows amber instead of blue at worst).
+- Reading note: in this toolchain's objdump output, an instruction marked `#` and the indented one after it
+  execute in the opposite order (indented first).
+
+### Current build (supersedes every earlier core id / hash in this file)
+- Recovery core id `e58934d4e5968ae4`; firmware 263,624 B; block 1 has 28 B spare in the app slot.
+- `firmware/build/doom_code.fwsc`: 610,086 B, SHA-256
+  `35ccf39bc93b12d1c5904bf61c42c42346cfb66e5c2cb9341949bdc34620a59f`. All 15 package tests pass; Felucca 1.5's
+  own update test accepts all three packages.
+- VERIFIED on the Mac: the flash as it would be after installing `doom_code` (the backup with the app area
+  replaced by the package's) passes every `check_dump.py` check with the chip key from the device's own image:
+  app-area head, app-area data, `app.bin` (263,624 B used, identity `FM-1_900`), `cfg_tool.bin`. The install
+  would change 121 of 143 app-area sectors.
+- Installer page regenerated: `firmware/build/site_code` (package inside byte-identical). Not served yet.
+
+### If `doom_code` does not come up (procedure agreed in advance)
+1. Do not switch off. Leave it connected for 4 minutes: crashes are counted (three → boot ROM) and safe mode
+   gives up after 180 s without a host.
+2. Check the Mac for `4C4A:8057` (`tools/venv/bin/python tools/fm1boot.py probe`).
+3. In boot mode: `sudo tools/venv/bin/python tools/fm1restore.py restore backups/fm1-flash-20261009-141944.bin --write`
+   puts Felucca 1.5 back (Sean runs it, after a yes).
+4. If it never reaches boot mode: only the Transporter's power-on key (XIAO RP2040) gets in.
