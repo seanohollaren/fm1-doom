@@ -11,6 +11,9 @@
   sudo fm1restore.py restore BACKUP.bin --write [--all]
                                                      make the flash equal the backup: application area
                                                      [0x4000, 0x93000), or with --all everything from 0x4000
+  sudo fm1restore.py data PACKAGE.fwsc --write       write the game data a package carries above the application
+                                                     area, [0x93000, 0xE0000), and nothing else. Refused unless
+                                                     the application area on the FM-1 already equals the package's
 
 Rules built in:
   * nothing below 0x4000 (flash header, boot loader, chip configuration) is ever erased or written;
@@ -40,6 +43,7 @@ SECTOR = 0x1000
 FLOOR = 0x4000                          # never write below this, whatever the caller asks
 APP_LO, APP_HI = 0x4000, 0x93000
 GAP_LO, GAP_HI = 0x93000, 0x97000       # blank on this unit and outside every firmware's own ranges
+DATA_LO, DATA_HI = 0x93000, 0xE0000     # game data block 2 (the update staging area starts at 0xE0000)
 TEST_SECTOR = 0x95000
 CMD_ERASE_SECTOR = 0xFB01
 CMD_WRITE_FLASH = 0xFB04
@@ -136,12 +140,31 @@ def wait_enter(proto, prompt):
 
 def restore(proto, log, want, lo, hi, write, interactive=True):
     """Returns the list of sectors that still differ (empty = flash equals the backup in [lo, hi))."""
+    return apply(proto, log, proto.read_all("read before"), want, lo, hi, write, interactive)
+
+
+def write_data(proto, log, image, write, interactive=True):
+    """image: the flash image inside a package that carries game data above the application area."""
+    if len(image) != DATA_HI:
+        raise Fm1Error("this package carries no data above the application area")
     cur = proto.read_all("read before")
+    n = len(differing(cur, image, APP_LO, APP_HI))
+    if n:
+        raise Fm1Error(f"the firmware on the FM-1 is not the one this data belongs to ({n} application sectors "
+                       "differ from the package); nothing written")
+    log("the application area on the FM-1 equals the package's")
+    want = bytearray(cur)
+    want[DATA_LO:DATA_HI] = image[DATA_LO:DATA_HI]
+    return apply(proto, log, cur, bytes(want), DATA_LO, DATA_HI, write, interactive, whole=True)
+
+
+def apply(proto, log, cur, want, lo, hi, write, interactive=True, whole=False):
+    """Make [lo, hi) equal `want`. whole: `want` describes the entire flash, so nothing else may change."""
     if cur[:FLOOR] != want[:FLOOR]:
         raise Fm1Error("the first 0x4000 bytes on the device differ from the backup's: not this unit's backup; "
                        "nothing written")
     todo = differing(cur, want, lo, hi)
-    log(f"{len(todo)} of {(hi - lo) // SECTOR} sectors in {lo:06X}-{hi:06X} differ from the backup" +
+    log(f"{len(todo)} of {(hi - lo) // SECTOR} sectors in {lo:06X}-{hi:06X} differ from the target" +
         (f": {todo[0]:06X} .. {todo[-1]:06X}" if todo else ""))
     if not todo or not write:
         if todo:
@@ -171,7 +194,13 @@ def restore(proto, log, want, lo, hi, write, interactive=True):
         if cur[:FLOOR] != want[:FLOOR]:
             log("WARNING: the first 0x4000 bytes changed although nothing was written there")
         if not left:
-            log(f"flash equals the backup in {lo:06X}-{hi:06X}")
+            log(f"flash equals the target in {lo:06X}-{hi:06X}")
+            if whole:
+                other = differing(cur, want, 0, FLASH_SIZE)
+                if other:
+                    log(f"WARNING: {len(other)} sectors outside it changed: {', '.join(f'{a:06X}' for a in other[:8])}")
+                    return other
+                log("every other sector is unchanged")
             return []
         log(f"{len(left)} sectors still differ: {', '.join(f'{a:06X}' for a in left[:8])}")
         if not interactive:
@@ -394,6 +423,27 @@ def selftest():
         check("USB failure in the middle is reported", False)
     except Fm1Error:
         check("USB failure in the middle is reported", True)
+    # --- game data above the application area
+    pkg = bytearray(backup[:DATA_HI])
+    for a in range(DATA_LO, 0xD9000, SECTOR):
+        pkg[a:a + SECTOR] = bytes(rnd.randrange(256) for _ in range(SECTOR - 256)) + b"\xff" * 256
+    pkg = bytes(pkg)
+    sim, p = session(backup)
+    left = write_data(p, silent, pkg, write=False, interactive=False)
+    check("data, dry run: lists 70 sectors, writes nothing", len(left) == 70 and not sim.erased and not sim.programmed)
+    sim, p = session(backup, corrupt_once={0xA0000})
+    left = write_data(p, silent, pkg, write=True, interactive=False)
+    check("data: region equals the package's, one bad sector retried", not left and
+          sim.image[DATA_LO:DATA_HI] == pkg[DATA_LO:DATA_HI] and sim.erased.count(0xA0000) == 2)
+    check("  nothing outside [93000, E0000) erased or changed", min(sim.erased) >= DATA_LO and max(sim.erased) < 0xD9000
+          and sim.image[:DATA_LO] == backup[:DATA_LO] and sim.image[DATA_HI:] == backup[DATA_HI:])
+    sim, p = session(other)
+    refuses("data: refused when the firmware on the device is not the package's",
+            lambda: write_data(p, silent, pkg, write=True, interactive=False))
+    check("  and nothing was sent", not sim.erased and not sim.programmed)
+    sim, p = session(backup)
+    refuses("data: a package without a data region is refused",
+            lambda: write_data(p, silent, pkg[:APP_HI], write=True, interactive=False))
     for c in (0xFB00, 0xFB02, 0xFC12, 0xFC0D, 0xFB06):
         refuses(f"command {c:04X} cannot be built by this tool", lambda: wcdb(c, b""))
     print("SELFTEST PASSED" if ok else "SELFTEST FAILED")
@@ -406,7 +456,7 @@ def main(argv):
     cmd = args[0] if args else ""
     if cmd == "selftest":
         return 0 if selftest() else 1
-    if cmd not in ("compare", "sectortest", "restore") or (cmd != "sectortest" and len(args) != 2) or len(args) > 2:
+    if cmd not in ("compare", "sectortest", "restore", "data") or (cmd != "sectortest" and len(args) != 2) or len(args) > 2:
         print(__doc__)
         return 2
     log = fb.Log(fb.ROOT / "backups" / "fm1boot.log")
@@ -415,7 +465,16 @@ def main(argv):
         for a in argv[1:]:
             if a.startswith("--sector="):
                 sector = int(a.split("=", 1)[1], 0)
-        want = load_backup(args[1], log) if len(args) == 2 else None
+        want = image = None
+        if cmd == "data":
+            import check_dump
+            image = check_dump.flash_of_package(args[1])
+            if image is None:
+                raise Fm1Error(f"{args[1]} is not a readable package")
+            log(f"package {Path(args[1]).name}: flash image {len(image):#x} B, sha256 "
+                f"{hashlib.sha256(Path(args[1]).read_bytes()).hexdigest()[:16]}")
+        elif len(args) == 2:
+            want = load_backup(args[1], log)
         lo, hi = (FLOOR, FLASH_SIZE) if "--all" in flags else (APP_LO, APP_HI)
         loader = fb.LOADER_FILE.read_bytes()
         if fb.probe(log):
@@ -430,6 +489,12 @@ def main(argv):
             if cmd == "sectortest":
                 log(f"WRITE TEST on blank sector {sector:06X}")
                 sectortest(p, log, sector, want)
+            elif cmd == "data":
+                write = "--write" in flags
+                log(f"{'GAME DATA (writing)' if write else 'game data, dry run (reads only)'}: "
+                    f"window {DATA_LO:06X}-{DATA_HI:06X}")
+                left = write_data(p, log, image, write)
+                rc = 1 if (left and write) else 0
             else:
                 write = cmd == "restore" and "--write" in flags
                 log(f"{'RESTORE (writing)' if write else 'compare (reads only)'}: window {lo:06X}-{hi:06X}")

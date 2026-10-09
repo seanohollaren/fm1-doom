@@ -996,3 +996,29 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   (preview entry `fm1-install-part1`, port 8793; a new port so Chrome cannot show a cached page). Predicted
   change: 80 app-area sectors (`0x4000` and `0x44000–0x92000`); the predicted image passes `check_dump.py`.
   This is the first use of OUR update entry (flash writes from our firmware, hand-over to the loader).
+
+## 2026-10-09 ~15:40 — `doom_part1` installed through OUR update entry (VERIFIED on the device)
+
+- Sean approved, opened `http://localhost:8793/` and pressed Install on the blue screen. The page finished;
+  the FM-1 shows blue with two white squares and a green bar (`SAFE_PART2`).
+- Proves on hardware: our firmware's update entry (session over USB-MIDI, erase/program of the staging area
+  from our firmware with Felucca's RAM flash driver, the update record, the hand-over through the SPL to
+  Felucca's loader); the loader rewriting the app area under our firmware; the descriptor and data block 1
+  read back through the encrypted XIP mapping with a correct checksum (317,824 B).
+- So firmware updates from our firmware over the web installer are a proven path from now on.
+
+### Block 2 goes on from the Mac (tool ready, not yet run)
+- `tools/fm1restore.py data PACKAGE.fwsc [--write]`: writes only `[0x93000, 0xE0000)` from the flash image
+  inside a package, and refuses unless the app area on the FM-1 already equals the package's (so data and
+  firmware cannot be mismatched). Same sector commands and rules as `restore`; afterwards a full read must
+  show the region equal and every other sector unchanged. Self-test now 51 checks, all pass.
+- Source of the data: `firmware/build/doom_full.fwsc` (925,589 B, SHA-256 below); only its flash image's
+  data region is used, its modified loader is never sent anywhere. 71 sectors, `0x93000–0xD9FFF`.
+- VERIFIED on the Mac, on the predicted final flash: the firmware's own start-up check replayed in Python
+  passes (descriptor checksum; block 1 "IWHX" + checksum; block 2 range + checksum; block 1 + block 2 equal
+  `data/e1m1_6h.whx` byte for byte). None of the 105 update-record positions between `0x93000` and `0xFC000`
+  has a matching checksum field or any of the record's marker words.
+- Decision: write block 2 for the installed build now and see the game run; the next firmware iteration will
+  pin the split point (so later firmware updates do not need block 2 rewritten) and read the volume knob.
+  Until then the output level is fixed at what Felucca calls full volume.
+- `doom_full.fwsc` SHA-256: `8838842ad73243136f521078d59efe6b4a021a268491f4c8a9bc75d49dcd23d7`
