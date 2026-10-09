@@ -8,6 +8,8 @@ writes flash.
   fm1boot.py probe                no root:   is an FM-1 in boot mode on the bus? print what it reports
   sudo fm1boot.py info            start the RAM loader, read chip key and flash id
   sudo fm1boot.py dump [OUT.bin]  info, then read the whole 1 MiB flash twice, compare, save
+  sudo fm1boot.py ramdump [OUT.bin]  read the chip's 512 KB of RAM as the firmware left it (before the RAM
+                                  loader is uploaded), save it, then start the loader so the FM-1 restarts
 
 Why sudo: macOS's own mass-storage driver owns the device; libusb can only take it over as root.
 
@@ -44,6 +46,8 @@ READ_MAX = 4096          # largest READ_FLASH issued
 # ROM UBOOT1.00
 CMD_WRITE_MEMORY = 0xFB06        # RAM only; used for the loader upload and nothing else
 CMD_JUMP = 0xFB08
+CMD_READ_MEMORY = 0xFD07         # RAM read, boot ROM stage only (tools/ramlook.py reads the result)
+RAM_LO, RAM_HI = 0x01C00000, 0x01C80000
 # LoaderV2 (after the jump)
 CMD_READ_FLASH = 0xFD05
 CMD_READ_KEY = 0xFC09
@@ -51,7 +55,8 @@ CMD_GET_ONLINE_DEVICE = 0xFC0A
 CMD_GET_USB_BUFF_SIZE = 0xFC14
 # Every command this tool may put on the wire. Flash erase (FB00..FB02), flash write (FB04), key write (FC12)
 # and the rest are absent on purpose; cdb() refuses anything not listed.
-ALLOWED = {CMD_WRITE_MEMORY, CMD_JUMP, CMD_READ_FLASH, CMD_READ_KEY, CMD_GET_ONLINE_DEVICE, CMD_GET_USB_BUFF_SIZE}
+ALLOWED = {CMD_WRITE_MEMORY, CMD_JUMP, CMD_READ_MEMORY, CMD_READ_FLASH, CMD_READ_KEY, CMD_GET_ONLINE_DEVICE,
+           CMD_GET_USB_BUFF_SIZE}
 
 MAGIC = bytes([0xC3, 0xCF, 0xC0, 0xE8, 0xCE, 0xD2, 0xB0, 0xAE, 0xC4, 0xE3, 0xA3, 0xAC, 0xD3, 0xF1, 0xC1, 0xD6])
 
@@ -141,6 +146,28 @@ class Fm1Boot:
         if len(r) != 16 or struct.unpack(">H", r[:2])[0] != cmd:
             raise Fm1Error(f"command {cmd:04X} answered {r.hex()}")
         return r[2:]
+
+    def read_ram(self, addr, n):
+        """RAM through the boot ROM (not once the loader runs: it lives in the same RAM)."""
+        if self.loader_running:
+            raise Fm1Error("RAM can only be read before the loader is started")
+        if n <= 0 or n > IO or addr < RAM_LO or addr + n > RAM_HI:
+            raise Fm1Error(f"RAM read {addr:08X}+{n} out of range")
+        d = self.t.bot(cdb(CMD_READ_MEMORY, struct.pack(">IH", addr, n)), n_in=n)
+        if len(d) != n:
+            raise Fm1Error(f"RAM read {addr:08X}+{n} returned {len(d)} bytes")
+        return crc_cipher(d)                     # the ROM ciphers every memory transfer
+
+    def ramdump(self):
+        v, p, _ = self.inquiry()
+        if v != "WL82" or not p.startswith("UBOOT1"):
+            raise Fm1Error(f'not the WL82 boot ROM ("{v}" / "{p}"); nothing read')
+        t0, out = time.time(), bytearray()
+        for addr in range(RAM_LO, RAM_HI, IO):
+            out += self.read_ram(addr, IO)
+        self.log(f"RAM {RAM_LO:08X}-{RAM_HI:08X}: {len(out)} B in {time.time() - t0:.1f} s, "
+                 f"sha256 {hashlib.sha256(out).hexdigest()[:16]}")
+        return bytes(out)
 
     def start_loader(self, blob):
         if self.loader_running:
@@ -337,8 +364,9 @@ class UsbTransport:
 # A simulated FM-1 in boot mode, for `selftest`. It fails loudly on anything a read-only tool must not send.
 # ---------------------------------------------------------------------------------------------------------
 class SimFm1:
-    def __init__(self, image, loader, key=CHIP_KEY, flash_id=FLASH_ID, buf=4096, flip_on_pass2=None):
+    def __init__(self, image, loader, key=CHIP_KEY, flash_id=FLASH_ID, buf=4096, flip_on_pass2=None, ram=None):
         self.image, self.loader, self.key, self.flash_id, self.buf = image, loader, key, flash_id, buf
+        self.sim_ram = ram
         self.mode, self.ram, self.reads, self.flip, self.log = "rom", {}, 0, flip_on_pass2, []
 
     def bot(self, cb, n_in=0, out=b"", timeout_ms=3000):
@@ -364,6 +392,11 @@ class SimFm1:
                 assert sorted(self.ram) == list(range(LOADER_ADDR, LOADER_ADDR + LOADER_SIZE, IO))
                 self.mode = "loader"
                 return cb[:2] + bytes(14)
+            if cmd == CMD_READ_MEMORY and self.sim_ram is not None:
+                addr, n = struct.unpack(">IH", cb[2:8])
+                assert n == n_in and 0 < n <= IO and RAM_LO <= addr and addr + n <= RAM_HI and not out
+                assert not self.ram, "RAM read after the loader upload began"
+                return crc_cipher(self.sim_ram[addr - RAM_LO:addr - RAM_LO + n])
             raise AssertionError(f"sim ROM: unexpected command {cmd:04X}")
         assert n_in and not out, "the loader must only be asked to send data"
         if cmd == CMD_READ_KEY:
@@ -443,6 +476,16 @@ def selftest():
         check("one flipped bit in the second read: refused", False)
     except Fm1Error as e:
         check(f"one flipped bit in the second read: refused ({e})", "054000" in str(e))
+    ram = bytes(random.Random(3).randrange(256) for _ in range(RAM_HI - RAM_LO))
+    sim = SimFm1(image, loader, ram=ram)
+    p = Fm1Boot(sim, silent)
+    check("RAM dump equals the simulated RAM", p.ramdump() == ram)
+    p.start_loader(loader)
+    try:
+        p.read_ram(RAM_LO, 16)
+        check("RAM read after the loader started: refused", False)
+    except Fm1Error:
+        check("RAM read after the loader started: refused", True)
     try:
         Fm1Boot(SimFm1(image, loader), silent).start_loader(loader[:-1] + b"\x00")
         check("altered loader file: refused", False)
@@ -478,7 +521,7 @@ def probe(log):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("selftest", "probe", "info", "dump"):
+    if len(argv) < 2 or argv[1] not in ("selftest", "probe", "info", "dump", "ramdump"):
         print(__doc__)
         return 2
     if argv[1] == "selftest":
@@ -498,6 +541,14 @@ def main(argv):
         try:
             p = Fm1Boot(t, log)
             t.wait_ready(p)
+            if argv[1] == "ramdump":
+                ram = p.ramdump()
+                out = Path(argv[2]) if len(argv) > 2 else backups / f"fm1-ram-{time.strftime('%Y%m%d-%H%M%S')}.bin"
+                if out.exists():
+                    raise Fm1Error(f"{out} exists; not overwriting")
+                out.write_bytes(ram)
+                give_back(out)
+                log(f"saved {out} ({len(ram)} B)")
             p.start_loader(loader)
             p.require_fm1()
             if argv[1] == "dump":

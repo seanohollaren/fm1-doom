@@ -1034,3 +1034,23 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
 - PROBLEM: the picture does not change after the title appears, although key presses produce menu sounds.
   Unknown yet whether the picture is frozen (game running blind) or only the menu overlay is missing.
   The present path and the main loop are the same code as the browser build, which shows the menu.
+
+## 2026-10-09 ~16:10 — Game-mode symptoms and a zero-flash way to look inside (tool ready, not yet run)
+
+- Sean's test at the title: first PLAY no sound; second PLAY a gunshot (menu select); third PLAY a gunshot cut
+  short by a red screen (CPU fault / guard) and a restart. The picture never changes, whatever is pressed.
+  So two separate problems: (1) nothing reaches the screen after the title; (2) starting E1M1 crashes.
+- The crash record (`fm1_crash`, `.noinit`, survives resets) holds pc / rets / sp of the fault, and
+  `fm1_enter_uboot()` reaches the boot ROM by a chip reset that leaves RAM alone. The boot ROM can read RAM
+  (READ_MEMORY `FD07`, ciphered per 512 B transfer; from the Transporter's protocol notes).
+- New, read-only: `tools/fm1boot.py ramdump` reads `0x01C00000–0x01C80000` in the ROM stage (before the RAM
+  loader is uploaded, which would overwrite part of it), saves `backups/fm1-ram-<time>.bin`, then starts the
+  loader so the FM-1 restarts. Self-test extended (simulated RAM round trip; refused once the loader runs).
+- New, Mac only: `tools/ramlook.py RAM.bin [BUILD_DIR]` reads a snapshot with the symbols of the installed
+  build: boot guard, crash record with function names, game / video state (`fm1_frames`, `gamestate`,
+  `menuactive`, video types, the two frame semaphores …), and writes the two 8-bit frame buffers (through
+  the palette in RAM) and the LCD strip buffers as PNG files. Tried on a synthetic image.
+- The installed build's ELF, symbols, map, disassembly and binaries are kept in
+  `firmware/installed_e58934d4/` (not in git) so later rebuilds cannot lose them.
+- ASSUMED until seen: that the ROM answers READ_MEMORY for the whole RAM range and that the game's RAM is
+  still there after the reset into the ROM (the ROM uses some RAM of its own).

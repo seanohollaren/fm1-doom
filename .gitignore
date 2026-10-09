@@ -32,3 +32,4 @@ tiny.whd.h
 /jl-uboot-tool/
 /tools/venv/
 /backups/
+/firmware/installed_*/
