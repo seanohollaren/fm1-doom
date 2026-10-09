@@ -794,3 +794,22 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   saved data (exact place of stock presets ASSUMED to be inside it). Expect presets saved on the FM-1 to be
   lost from here on; the copy is `~/Downloads/fm1-presets-2026-10-09.syx`, restorable only with Baud Girl's
   firmware and Device Manager.
+- 2026-10-09 ~13:50: Sean installed Felucca from the hosted installer (so 1.5) on stock V15; it restarted
+  into Felucca. VERIFIED by Sean's report. Stock → Felucca with Felucca's loader works on this unit.
+
+### Checks before the `doom_code` step (all on the Mac, VERIFIED)
+- Felucca 1.5's own `tests/ota_test.c` (extracted with `git archive v1.5` to `refs/felucca-1.5-src`),
+  unmodified, accepts `doom_code`, `doom_part1` and `doom_full` and stages their loaders. So the firmware now
+  running on the FM-1 should take our packages (host test, not hardware).
+- 1.5 did not change the boot guard, the reset-surviving variables, `crt0`, the vectors or the loader; the
+  `fm1_input.h` changes are LED animation only.
+- The firmware build is reproducible: a fresh `firmware/build.sh` + `pack.py` gave byte-identical
+  `text.bin` / `data.bin` / `ram_text.bin` and byte-identical packages. Recovery core id `1526164b9edc8f07`.
+  `doom_code.fwsc`: 610,086 B, SHA-256 `49a52fe5f5864d402b5bcec8d8a9e98f246c8e28ebfeea30f9fe297865bb50c5`.
+  All 15 package tests pass again.
+- Local installer page for `doom_code` generated with Felucca's own `web/make_site.py` into
+  `firmware/build/site_code` (the package inside is byte-identical to `doom_code.fwsc`; identity `FM-1_900`).
+  The page waits for the FM-1 to come back and report `FM-1_900`, so "Done" on the page = our firmware
+  started and its USB answered. Preview entry `fm1-install` (port 8792). NOT served yet; needs Sean's yes.
+- STILL MISSING for the brief's precondition ("working recovery path and a full flash backup before the
+  first experimental flash"): no boot-mode tool on hand, no flash dump. Put to Sean as a decision.
