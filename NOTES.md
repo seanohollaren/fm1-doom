@@ -745,3 +745,25 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   identity probe; (c) Baud Girl → M-VAVE stock by Baud Girl's documented route, which proves the way back
   to stock on this unit; (d) stock → published Felucca by Felucca's installer; then `doom_code` onwards
   as before.
+
+## 2026-10-09 — Device steps begin: links and facts for the opening steps (Sean does each step and reports)
+
+- VERIFIED from Baud Girl's manual (sections 12.1, 12.2, 12.11, 13.1, 13.5–13.7):
+  - Device Manager: `https://baudgirl.com/work/FM-1+VA/device-manager`. Needs Chrome or Edge and Version 96
+    or later on the FM-1. Library → **Back up everything** saves `fm1-presets-<date>.syx` (128 presets) and
+    `fm1-patterns-<date>.syx` (16 patterns); the manual says this reads only and changes nothing on the FM-1.
+    On a Mac the FM-1 is usually listed as "USB Composite Device".
+  - Back to M-VAVE: Install page (`https://baudgirl.com/work/FM-1+VA/install`), fourth step "Choose a
+    version" → **Install a file from my computer** → M-VAVE's file. The manual gives no download link.
+  - If an install stops with the display dark: do not switch off; reload the Install page with the FM-1
+    still connected and click Test connection to finish. Switch off only if the page says nothing was
+    installed.
+- VERIFIED from Felucca (`web/index_pkg.html`, `tools/fm1_install.py`): M-VAVE's downloads are at
+  `https://www.m-vave.com/download`; the unmodified official V15 `FM-1.fwsc` has SHA-256
+  `db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a` (check the download with
+  `shasum -a 256` before it is installed). Felucca's web installer: `https://hugelton.github.io/Felucca/`.
+- VERIFIED from the Transporter's DEVLOG: stock V15 enables USB only after a cold power-on; after the
+  restart that ends an install it runs but does not appear on USB. ASSUMED consequence: after going back to
+  stock, switch the FM-1 off and on before the next installer can see it.
+- Decision: skip the identity probe (`fm1_install.py --info`). We go through stock regardless, so its answer
+  changes nothing, and it would send a query to firmware whose handling of it is unknown.
