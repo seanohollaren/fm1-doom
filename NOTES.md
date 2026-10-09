@@ -723,3 +723,25 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   install. ASSUMED hurdles: macOS's own mass-storage driver claims the device first (may need `sudo`), and I
   cannot test any of it without the FM-1 attached. CLAUDE.md lists jl-uboot-tool as reference-only unless
   approved, hence the question.
+
+## 2026-10-09 — Sean's FM-1 already runs Baud Girl's FM-1+VA (Version 97 is current), installed by its web page
+
+- Consequence: the USB install route is already proven on this unit (step 1's purpose). The starting point is
+  now Baud Girl's firmware, not stock.
+- VERIFIED from Baud Girl's manual (section 13): presets and patterns are kept in a part of memory separate
+  from the firmware and survive installs; going back to M-VAVE's firmware is documented — download M-VAVE's
+  file, then on the Install page's fourth step choose "Install a file from my computer"; the Device Manager
+  saves and restores backups of presets and patterns.
+- VERIFIED from Felucca's sources: its installer drives a two-step update in which the *running* firmware
+  starts the loader carried in the package. Felucca's own update entry starts only M-VAVE's official loader
+  or Felucca's (`ota.c`, refuses anything else before writing). M-VAVE's official loader rewrites the whole
+  flash image including the head.
+- UNKNOWN: whether Baud Girl's firmware will start the Felucca loader that our packages (and Felucca's)
+  carry, whether it answers the installer's identity query, and whether it honours the boot-mode SysEx.
+  Stock is the documented starting point for installing Felucca.
+- A zero-write probe exists: `python3 Felucca/tools/fm1_install.py --info` sends one identity query and
+  prints what the FM-1 reports. Needs `pip3 install mido python-rtmidi` (not installed) and Sean's OK.
+- Revised opening of the staged plan: (a) back up presets/patterns in Baud Girl's Device Manager; (b) the
+  identity probe; (c) Baud Girl → M-VAVE stock by Baud Girl's documented route, which proves the way back
+  to stock on this unit; (d) stock → published Felucca by Felucca's installer; then `doom_code` onwards
+  as before.
