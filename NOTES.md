@@ -969,3 +969,30 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   build, not Felucca 1.5's five interfaces.
 - NOT yet proven on hardware: our own update entry (flash writes from our firmware, hand-over to the loader);
   the key chords and HOME-at-power-on; the 180 s timeout into the boot ROM; anything in game mode.
+
+## 2026-10-09 ~15:25 — The ways out of our firmware, all VERIFIED on the device (no writes)
+
+- HOME held at power-on → cyan screen (safe mode by key). Key scanning before interrupts works.
+- Normal power-on, no host talking → blue screen, white bar shrinking.
+- OCT- + OCT+ held 5 s → dark; `sudo tools/venv/bin/python tools/fm1boot.py dump` then read the flash twice
+  (INQUIRY answered at the first attempt this time): `backups/fm1-flash-20261009-151030.bin`, SHA-256
+  `4cec8500a40da658053bd3515826378d5c4f6729919cf25aa207fd22f2a6b9a1`. The FM-1 restarted into our firmware.
+- That dump is **bit-for-bit the image predicted before the install** (the Felucca backup with the app area
+  replaced by `doom_code`'s): 121 app-area sectors changed, nothing else anywhere. So Felucca's loader wrote
+  exactly the package and our firmware has written nothing to flash by itself.
+- Left alone for 3 minutes → the bar ran out and the screen went dark; from the Mac: `4C4A:8057`
+  "WL80UBOOT1.00". The timeout into the boot ROM works.
+
+## Plan change: the loader variant will NOT be used on this unit
+- `doom_full.fwsc` carries a loader I modified (it also writes `[0x93000, 0xE0000)`). It has passed host
+  tests only. A loader that fails on hardware is the worst place to fail: the SPL would run it at every
+  start (the update record stays), our firmware would never run, and nothing could reach the boot ROM.
+- Instead: install `doom_part1.fwsc` (same app area as `doom_full`, VERIFIED equal; Felucca's unmodified
+  loader), then write data block 2 at `0x93000` from the Mac in boot mode with the sector commands already
+  proven on this unit in that very region. The firmware checks block 2's checksum at every start, so a bad
+  or partial write only means safe mode (blue, two corners).
+- Next install: `doom_part1.fwsc`, 610,086 B, SHA-256
+  `3b4013ca55604873f575bcab99d52bfb84b189db4fa4a06509b8b67fd74438c3`, page in `firmware/build/site_part1`
+  (preview entry `fm1-install-part1`, port 8793; a new port so Chrome cannot show a cached page). Predicted
+  change: 80 app-area sectors (`0x4000` and `0x44000–0x92000`); the predicted image passes `check_dump.py`.
+  This is the first use of OUR update entry (flash writes from our firmware, hand-over to the loader).
