@@ -1102,3 +1102,24 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   block 2 in place), so the FM-1 will show the two-square blue screen until the data write.
 - Symbols of this build: `firmware/installed_f82c2608/`. Installer page: `firmware/build/site_b2`, preview
   entry `fm1-install-b2`, port 8794.
+
+## 2026-10-09 ~16:55 — DOOM E1M1 RUNS ON THE FM-1 (VERIFIED on the device, by Sean's report)
+
+- Sean installed the fully rebuilt `doom_part1.fwsc` (`f82c2608…`) from `http://localhost:8794/` in safe mode,
+  then wrote block 2 from boot mode with `fm1restore.py data firmware/build/doom_full.fwsc --write`.
+  Report: "Incredible! It looks like it works. We probably have some tweaking to do with the controls".
+- So the stale-object diagnosis was right, and on hardware now: title, menu, level load, rendering, sound,
+  keys. MVP reached in substance; controls need tuning; frame rate, sound quality and the volume knob are
+  not yet characterised (the knob is not read: output is at Felucca's full level).
+- Open design question from Sean: a hosted one-button web install for other people, without the boot-mode
+  shell step. Constraints: a browser has Web MIDI only (WebUSB refuses mass-storage interfaces, so boot mode
+  is out of reach of a page); Felucca's unmodified loader writes only the app area. Options: (1) our safe
+  mode receives block 2 over the update protocol's own SysEx transport and writes `[0x93000, 0xE0000)` itself,
+  driven by the same installer page as a second phase; (2) the modified loader (rejected for this unit: a
+  loader that fails cannot be recovered without the power-on key); (3) fit everything in the app slot (not
+  possible: 316 KB for 607 KB of data). Recommended: (1).
+- To settle before publishing anything: the game data is a cut-down, converted copy of the shareware
+  `doom1.wad`, and the shareware licence allows redistribution only unmodified (ASSUMED from the licence's
+  usual wording; not checked by a lawyer). A public page should build the data in the browser from the WAD
+  the visitor supplies, or the question must be answered first. Also: block 2 overwrites Felucca's store
+  (`0x97000–0xE0000`), so Felucca users lose saved projects and samples; only one unit has been tested.
