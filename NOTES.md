@@ -1123,3 +1123,19 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   usual wording; not checked by a lawyer). A public page should build the data in the browser from the WAD
   the visitor supplies, or the question must be answered first. Also: block 2 overwrites Felucca's store
   (`0x97000–0xE0000`), so Felucca users lose saved projects and samples; only one unit has been tested.
+
+## 2026-10-09 — Filling the square screen (question from Sean; nothing built yet)
+
+- Now: 320x200 is shown as 240x150 (x0.75 both ways, square pixels), 45 black rows above and below.
+- The screen link is the frame-rate ceiling for a static picture: 240 x 150 x 16 bits at 12 MHz = 48 ms per
+  frame = 20.8 fps, and the snapshot at the title measured 18.9 fps (5433 presents in 287 s). In-level frame
+  rate has not been measured. 240x240 at 12 MHz would be 77 ms = 13 fps at best; at 24 MHz, 38 ms.
+  Felucca's `LCD_BAUD` 4 = 12 MHz; a faster setting is ASSUMED to work (ST7789, short traces), untested.
+- Options: (a) stretch 200 rows to 240 (cheap; everything 1.6x taller relative to its width than now, 1.33x
+  versus the 4:3 look Doom was drawn for); (b) 240x180, the 4:3 look, 75 % of the screen; (c) uniform x1.2 and
+  crop to the middle 62.5 % of the width (right proportions, loses side view, status bar needs its own
+  treatment); (d) anamorphic rendering: change the renderer's vertical scale so the 320x168 view holds a
+  taller field, then stretch on output (right proportions, full screen, no extra RAM, but surgery in
+  `pd_render.cpp`); (e) a natively taller view (about +77 KB of frame buffers: not affordable).
+- Proposal: raise the LCD clock first, then make (a)/(b)/current switchable with a button to judge on the
+  device; consider (d) only if the stretch looks wrong.
