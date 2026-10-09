@@ -101,7 +101,9 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
 #define HALF_FRAMES 128u
 #define HALF_WORDS (HALF_FRAMES * 2u)
 #define OUT_RATE 44118u                  /* the I2S frame rate Felucca measured: 24 MHz / 544 */
-#define OUT_SHIFT 7                      /* 16-bit -> the codec's 24-bit words, -6 dBFS ceiling (as Felucca) */
+#define DEV_VOLUME_PCT 5                 /* fixed for now: the volume knob is not read yet. 100 = the 16-bit mix shifted
+                                          * up 7 bits into the codec's 24-bit words, Felucca's -6 dBFS ceiling */
+#define DEV_GAIN_Q8 ((128 * 256 * DEV_VOLUME_PCT) / 100)
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static int16_t apcm[HALF_WORDS];
 
@@ -114,7 +116,7 @@ void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
         uint32_t i;
         fm1_audio_read(apcm, HALF_FRAMES, OUT_RATE);         /* resampled from the game's ring (fm1_audio.c) */
         for (i = 0; i < HALF_WORDS; i++)
-            o[i] = (int32_t)apcm[i] * (1 << OUT_SHIFT);
+            o[i] = ((int32_t)apcm[i] * DEV_GAIN_Q8) >> 8;
         fm1_audio_ack_half();
     }
 }
@@ -183,7 +185,28 @@ static int ota_prog(uint32_t off, const void *p, uint32_t n)
     return fl_write(off, p, n);
 }
 static int ota_fread(uint32_t off, void *p, uint32_t n) { return flash_ok ? st_read(off, p, n) : -8; }
-static void dev_screen(uint16_t c) { lcd_fill(0, 0, 240, 240, c); }
+/* The screen link's clock is lsb / (n + 1); Felucca runs it at n = 4 ("12 MHz", so lsb is taken to be 60 MHz).
+ * The game may step through faster settings (LFO button); every screen this file draws itself goes out at
+ * Felucca's proven rate. */
+static const uint8_t DEV_LCD_BAUD[] = {LCD_BAUD, 2, 1, 0};
+static uint8_t dev_lcd_i;
+static void dev_lcd_rate(uint32_t i)
+{
+    lcd_sync();                          /* no transfer in flight while the clock changes */
+    dev_lcd_i = (uint8_t)i;
+    fm1_lcd_baud(DEV_LCD_BAUD[i]);
+}
+int fm1_lcd_speed_next(void)
+{
+    dev_lcd_rate((dev_lcd_i + 1u) % sizeof DEV_LCD_BAUD);
+    return (int)(60u / (DEV_LCD_BAUD[dev_lcd_i] + 1u));
+}
+static void dev_screen(uint16_t c)
+{
+    if (dev_lcd_i)
+        dev_lcd_rate(0);
+    lcd_fill(0, 0, 240, 240, c);
+}
 static void dev_mode_screen(void);
 static void ota_show(uint32_t step, int32_t code)   /* no font in this build: a white bar per step on blue, red = failed */
 {

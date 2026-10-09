@@ -17,7 +17,7 @@ Ctrl or F &rarr; F5 / E5 (fire) &middot; Space &rarr; G5 (use) &middot; Enter &r
   const PANEL = { ArrowUp: {n: 3}, ArrowLeft: {n: 2}, ArrowDown: {n: 4}, ArrowRight: {n: 6}, Comma: {n: 0}, Period: {n: 7},
                   ShiftLeft: {n: 1}, ShiftRight: {n: 25}, ControlLeft: {n: 24}, ControlRight: {n: 24}, KeyF: {n: 23}, Space: {n: 26},
                   Escape: {b: BTN.HOME}, Enter: {b: BTN.PLAY}, KeyR: {b: BTN.REC}, BracketLeft: {b: BTN.OCTDN}, BracketRight: {b: BTN.OCTUP},
-                  KeyY: {b: BTN.FX}, Minus: {e: [0, -1]}, Equal: {e: [0, 1]}, Digit9: {e: [6, -1]}, Digit0: {e: [6, 1]} };
+                  KeyY: {b: BTN.FX}, KeyV: {b: BTN.SCL}, KeyL: {b: BTN.LFO}, KeyP: {b: BTN.ENV}, Minus: {e: [0, -1]}, Equal: {e: [0, 1]}, Digit9: {e: [6, -1]}, Digit0: {e: [6, 1]} };
   var Module = {
     onRuntimeInitialized() {
       const ctx = document.getElementById('lcd').getContext('2d'), img = ctx.createImageData(240, 240);

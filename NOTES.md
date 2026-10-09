@@ -1139,3 +1139,26 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   `pd_render.cpp`); (e) a natively taller view (about +77 KB of frame buffers: not affordable).
 - Proposal: raise the LCD clock first, then make (a)/(b)/current switchable with a button to judge on the
   device; consider (d) only if the stretch looks wrong.
+
+## 2026-10-09 ~17:30 — Picture shapes, screen link speed, frame-rate readout, 5 % volume (built; NOT installed yet)
+
+- `rp2040-doom/src/fm1/fm1_video.c`: the 200 source lines become 150, 180 or 240 panel rows, centred, by a
+  line accumulator (3 of 4 kept / 9 of 10 kept / every fifth doubled); the rows outside the picture are
+  blacked once when the shape changes. **SCL** steps through the shapes.
+- `firmware/doom_dev.c`: **LFO** steps the screen link clock through divisors 4, 2, 1, 0 of Felucca's `lsb`
+  clock, reported as 12 / 20 / 30 / 60 MHz (ASSUMED: derived from Felucca's "4 = 12 MHz"; the frame rate will
+  show the truth). The change waits for the transfer in flight. Every screen the device code draws itself
+  (safe mode, update progress, crash colours, the dark screen before boot mode) first goes back to
+  Felucca's rate, so a setting that garbles the game picture cannot hide those. Not remembered across a
+  restart: each start begins at 12 MHz and 240x150.
+- **ENV** shows frames presented per second over the last second. All three buttons answer on the game's
+  own message line, so only while a level is up.
+- Volume: `DEV_VOLUME_PCT 5` (linear, of Felucca's full level) in the audio interrupt; the knob is still unread.
+- VERIFIED in the browser build (full rebuild; `node web/test_view.js DIR`, new): picture rows 45..194 (150),
+  30..209 (180), 0..239 (240), back to 45..194 with the bands black again; the three message lines appear;
+  gameplay test unchanged (health 25 at t=13). The link-speed code is device-only and has not run anywhere.
+- Firmware 265,956 B, recovery core id `1fb71fa131d2c49f` (changed: `dev_screen`, the audio gain line, the new
+  link function). `doom_part1.fwsc` SHA-256 `65dd0d0928c9c6de67afb3815082cfaa66acbbe37bea72cf086d5f7d108ef585`.
+  Split still 294,980 and the data region equals what is on the FM-1, so this is a USB install only (138 of
+  143 app sectors change); the predicted image passes `check_dump.py` and the replayed start-up check.
+  Symbols: `firmware/installed_65dd0d09/`. Page: `firmware/build/site_b3`, preview `fm1-install-b3`, port 8795.
