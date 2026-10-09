@@ -767,3 +767,10 @@ Felucca's, has to bring up USB on the device. Everything after it is behind safe
   stock, switch the FM-1 off and on before the next installer can see it.
 - Decision: skip the identity probe (`fm1_install.py --info`). We go through stock regardless, so its answer
   changes nothing, and it would send a query to firmware whose handling of it is unknown.
+- 2026-10-09 13:29: Sean saved `fm1-presets-2026-10-09.syx` with Baud Girl's Device Manager (VERIFIED on
+  disk: 29,568 B, 128 SysEx messages of 231 B). The patterns file did not download; Sean chose to skip it
+  (only default and Baud Girl patterns on the unit).
+- 2026-10-09 13:34: Sean downloaded M-VAVE's `FM-1.fwsc` from
+  `https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc` (the link on M-VAVE's
+  download page). VERIFIED: 699,956 B, SHA-256 `db1642b2…edb8a` = official V15. Copy kept at
+  `refs/FM-1-V15-official.fwsc` (not in git).
