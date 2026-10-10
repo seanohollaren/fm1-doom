@@ -127,10 +127,10 @@
   stroke: var(--g-volume);
 }
 
-.device--controls .dv-btn.is-filter rect,
-.device--controls .dv-knob.is-filter .dv-knob__cap {
-  fill: var(--g-filter);
-  stroke: var(--g-filter);
+.device--controls .dv-btn.is-sound rect,
+.device--controls .dv-knob.is-sound .dv-knob__cap {
+  fill: var(--g-sound);
+  stroke: var(--g-sound);
 }
 
 .device--controls .dv-btn.has-group text {

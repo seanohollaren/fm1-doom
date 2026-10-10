@@ -101,11 +101,12 @@ describe.skipIf(!existsSync(source))('the controls table against the firmware so
     // EDIT is handled outside the map, in code. So are SCL and ENV (picture shape, frame rate), which the page
     // leaves out on purpose; LFO does nothing any more.
     expect(c).toContain('FM1_BTN_EDIT)')
-    buttons.EDIT = 'filter'
+    buttons.EDIT = 'sound'
     expect(c).not.toContain('FM1_BTN_LFO')
-    // the filter's two knobs
-    expect(c).toContain('enc[FM1_ENC_K1]')
-    expect(c).toContain('enc[FM1_ENC_K2]')
+    // the knobs: every encoder the firmware reads is in the table, and no other
+    const read = new Set([...c.matchAll(/enc\[FM1_ENC_(\w+)\]/g)].map((m) => m[1]))
+    const NAME: Record<string, string> = { SELECT: 'SELECT', PRESET: 'PRESETS', K1: 'KNOB 1', K2: 'KNOB 2', K3: 'KNOB 3', K4: 'KNOB 4' }
+    expect([...read].map((k) => NAME[k]).sort()).toEqual(Object.keys(KNOBS).filter((k) => k !== 'MASTER').sort())
     expect(BUTTONS).toEqual(buttons)
   })
 })

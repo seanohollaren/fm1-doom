@@ -1,7 +1,7 @@
 // What each control does in the game: one table for the drawing of the FM-1 and for the list next to it.
 // It restates rp2040-doom/src/fm1/fm1_controls.c (FM1_MAP and the knob code below it); change both together.
 
-export type Group = 'move' | 'side' | 'fire' | 'use' | 'weapon' | 'menu' | 'volume' | 'filter'
+export type Group = 'move' | 'side' | 'fire' | 'use' | 'weapon' | 'menu' | 'volume' | 'sound'
 
 export const GROUPS: { id: Group; name: string }[] = [
   { id: 'move', name: 'Move' },
@@ -11,7 +11,7 @@ export const GROUPS: { id: Group; name: string }[] = [
   { id: 'weapon', name: 'Change weapon' },
   { id: 'menu', name: 'Menu' },
   { id: 'volume', name: 'Volume' },
-  { id: 'filter', name: 'Filter' },
+  { id: 'sound', name: 'Shape the sound' },
 ]
 
 /** note keys by position: 0 = the lowest key (F3) … 26 = the highest (G5) */
@@ -22,10 +22,12 @@ export const KEYS: Record<number, Group> = {
 
 /** buttons by their printed label (SCL and ENV also do something, picture shape and frame rate: left out on purpose) */
 export const BUTTONS: Record<string, Group> = {
-  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', EDIT: 'filter',
+  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', EDIT: 'sound',
 }
 
-export const KNOBS: Record<string, Group> = { SELECT: 'weapon', 'KNOB 4': 'weapon', MASTER: 'volume', 'KNOB 1': 'filter', 'KNOB 2': 'filter' }
+export const KNOBS: Record<string, Group> = {
+  SELECT: 'weapon', 'KNOB 4': 'weapon', MASTER: 'volume', 'KNOB 1': 'sound', 'KNOB 2': 'sound', 'KNOB 3': 'sound', PRESETS: 'sound',
+}
 
 /** what is written on each note key in the drawing: one word, or two with a line each */
 export const KEY_LABELS: Record<number, string[]> = {
@@ -39,11 +41,13 @@ export const TIPS: Record<string, string> = {
   SELECT: 'Previous and next weapon. With the menu open, moves through it.',
   'KNOB 1': 'Filter sweep. Left muffles the sound, right thins it; the centre is off.',
   'KNOB 2': 'Filter resonance: how hard the filter rings where it cuts.',
+  'KNOB 3': 'Drive: distortion, from a little grit to fuzz. All the way left is off.',
+  PRESETS: 'Changes the instrument the music is played on. All the way left is as written.',
   'KNOB 4': 'Previous and next weapon.',
   'OCT−': 'Previous weapon.',
   'OCT+': 'Next weapon.',
   FX: 'Answers yes when the game asks.',
-  EDIT: 'Turns the filter off.',
+  EDIT: 'Filter off, drive off, and the music back on its own instruments.',
   HOME: 'Opens and closes the menu.',
   PLAY: 'Chooses in the menu.',
   REC: 'Fire.',
@@ -79,12 +83,14 @@ export const LEGEND: { group: Group; rows: { keys: string[]; what: string }[] }[
   },
   { group: 'volume', rows: [{ keys: ['MASTER'], what: 'Louder and quieter; right down is silent' }] },
   {
-    // the synth's own trick: a filter over everything the game plays
-    group: 'filter',
+    // the synth's own tricks, over everything the game plays
+    group: 'sound',
     rows: [
-      { keys: ['KNOB 1'], what: 'Sweep. Left closes the sound down to a rumble; right thins it to a hiss; the centre is off' },
-      { keys: ['KNOB 2'], what: 'Resonance: how hard the filter rings where it cuts' },
-      { keys: ['EDIT'], what: 'Filter off' },
+      { keys: ['KNOB 1'], what: 'Filter sweep. Left closes the sound down to a rumble; right thins it to a hiss; the centre is off' },
+      { keys: ['KNOB 2'], what: 'Filter resonance: how hard the filter rings where it cuts' },
+      { keys: ['KNOB 3'], what: 'Drive: distortion, from a little grit to fuzz; all the way left is off' },
+      { keys: ['PRESETS'], what: 'The instrument the music is played on, from the game’s own 128; all the way left is as written' },
+      { keys: ['EDIT'], what: 'All of it off' },
     ],
   },
 ]

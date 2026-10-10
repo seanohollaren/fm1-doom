@@ -48,8 +48,8 @@
 .controls__group.g-volume {
   --g: var(--g-volume);
 }
-.controls__group.g-filter {
-  --g: var(--g-filter);
+.controls__group.g-sound {
+  --g: var(--g-sound);
 }
 
 .controls__name {
