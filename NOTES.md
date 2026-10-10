@@ -1301,3 +1301,170 @@ Short answer: bring-your-own works and is built; Freedoom's levels do not fit.
 - The "about the file" link (Doom Wiki, DOOM1.WAD) could not be checked from here: the site answers a bot check.
 - A default that needs no file: Sean to choose between (a) the page fetching the unmodified shareware WAD
   from a public mirror in the visitor's browser, checked by SHA-256, (b) a made-to-fit free level, (c) as built.
+
+## 2026-10-09 ~20:30 — The hosted site: Vite + React, AWS set-up, a designed six-step install (built and tested on the Mac; NOT deployed, NOT run against the device)
+
+Sean's request: host the installer as a Vite + React site on AWS like `static-personal-site`, at
+`doom.deadlockinteractive.com` (domain newly transferred to Route 53), with a staged install in the manner of
+Baud Girl's page, "nice and Doom appropriate".
+
+### Structure (`site/`, described in `site/README.md`)
+- `site/frontend`: Vite 7 + React 19 + TypeScript, vitest. Fonts self-hosted through the build (Big Shoulders
+  Display, IBM Plex Sans / Mono, all OFL): the page makes no request to any other host.
+- `site/infra`: CDK copied from `static-personal-site` and adapted: `DoomSiteCertStack` (us-east-1),
+  `DoomSiteFrontendStack` (us-west-2: private bucket, CloudFront with origin access control, A + AAAA alias
+  records). Added: a response-headers policy (content security policy, HSTS, no framing), and no single-page
+  404→index fallback (a missing firmware file must be a 404).
+- `.github/workflows/deploy.yml`: on a push to `main` touching `site/` or `web/`: token check, tests, build,
+  `cdk deploy` with the shared `github-actions-deploy` role.
+- The firmware and the converter the site serves are **committed build outputs**, copied in by
+  `site/sync_firmware.py VERSION` (firmware-only package `doom-b5.fwsc`, SHA-256 `ade8f712…`; `whd_gen_es.js/.wasm`,
+  wasm SHA-256 `b625a72a…`): CI needs no firmware toolchain. `*.fwsc` stays ignored everywhere else.
+
+### One install implementation
+- `web/install.js` (new): the install flow lifted out of `web/installer.html`, with no page in it; progress goes
+  out as events. Both pages use it. Also `probe()`: the identity handshake and, for our firmware, the cmd 0x44
+  question with the QUERY flag: asks, never writes.
+- `web/vendor/felucca/`: Felucca's `fm1pkg.js` and `fm1ota.js`, unmodified copies from v1.1.5 (the clone is not
+  part of this repository). `web/datapack.js` and `convert.js` now import what they use;
+  `web/make_installer.py` still inlines everything (it drops the import lines) and its 13 checks still pass.
+- `web/build_whdgen.sh` also links an ES-module wrapper (`whd_gen_es.js`; the `.wasm` is byte-identical to the
+  classic one). Named `.js` because static hosts do not all serve `.mjs` as JavaScript.
+
+### The page
+- Six steps: Check (browser), Game file (pick / drop a WAD; cut, converted and packed in a Web Worker), Prepare
+  (checklist, a map of the FM-1's 1 MB of flash showing what is replaced and what is kept, an acknowledgement),
+  Connect (asks the FM-1 what it runs; nothing written), Install, Play (controls).
+- A drawing of the FM-1 (laid out from Felucca's `docs/controls.jpg`) stays in view; its screen shows what the
+  real one should show at that point: the firmware's own plain-colour screens, same colours and squares and bars
+  (`doom_dev.c`), dark during the firmware write, then a drawing of the game. Changes of picture use the game's
+  column melt. The picture of the game is drawn for the page; nothing from the WAD is on the site.
+- Install progress as four cells with numerals built from pixels; the manual section has the controls on the
+  same drawing, coloured by what they do.
+- During an install: a leave-page warning, a screen wake lock, and the copy says to keep the tab in front
+  (Chrome slows background tabs' timers, and Felucca's update code runs on timers).
+- VERIFIED from the firmware source while writing the copy: amber appears after ONE start that died within its
+  first 30 s (`bootguard.failed`); three in a row drop to the boot ROM (dark).
+
+### Checks (all on the Mac)
+- `npm test` in `site/frontend`: 28 tests. The install flow against a stand-in FM-1 (`src/lib/fakeFm1.ts`) that
+  models both halves: the standard update (verify reads, loader, whole-image write) and the Doom firmware
+  (identity, cmd 0x44, the pull of block 2). Scenarios: from another firmware; safe mode with block 2 missing;
+  already installed; an older build with the same data; test mode; a firmware that stops asking; no device;
+  `probe`. The WAD pipeline with the ES-module converter: for `doom1.wad` the image and block 2 equal
+  `firmware/pack.py`'s. The controls table is compared with `FM1_MAP` in `fm1_controls.c`.
+- In the Browser pane: the development server with `?demo` (the stand-in device, development builds only)
+  walked through all six steps, a full install, a failed run and the finished state; 1200, 820 and 375 px wide,
+  no horizontal overflow. The production build under `npm run preview`, which sends the same security headers
+  as CloudFront will: worker, dynamic import and WebAssembly all run under
+  `script-src 'self' 'wasm-unsafe-eval'`; the WAD converts in 1.25 s; no console errors; no third-party request.
+- `cdk synth` succeeds with a placeholder hosted-zone id (removed afterwards): the templates hold the bucket,
+  the distribution with the alias `doom.deadlockinteractive.com`, the certificate, two record sets.
+- NOT done: no AWS call (the CLI session had expired), so the hosted zone is not confirmed to exist; nothing
+  deployed; no real FM-1 has met this page.
+
+### Open before it goes live
+- Hosted zone for `deadlockinteractive.com` (a transferred domain does not get one automatically); a GitHub
+  repository with a `main` branch; the repository in the deploy role's trust policy (immutable subject form).
+- `sourceUrl` in `site/frontend/src/site.ts` is empty: the GPL needs a public source link (this repository and
+  the `fm1-port` branch of rp2040-doom).
+- b5 is the build on the site and it still has the 5 % test volume; "going back through Felucca's installer"
+  and an install started while the game runs are still unverified on the device.
+
+## 2026-10-09 ~20:50 — A second level does not fit; the site fetches the shareware WAD itself (Mac only)
+
+### Could E1M2 come along? No (VERIFIED by converting it)
+Sean asked whether the second level could be included. Cut the same way as E1M1 (single-player things only, each
+level's own textures, flats, sprites, sounds and music; scratch script, native `whd_gen`):
+
+| Levels | Game data |
+| --- | --- |
+| E1M1 | 606,720 B |
+| E1M2 alone | 769,644 B |
+| E1M1 + E1M2 | 830,428 B |
+| E1M1 + E1M3 | 887,344 B |
+| E1M1 + E1M2 + E1M3 | 1,014,484 B |
+
+- Room next to the b5 firmware: 630,044 B. E1M1 + E1M2 is 200 KB over, and E1M2 would not fit even by itself:
+  it is twice E1M1's size as a map (1,323 sidedefs against 648, 262 things against 138) and uses 64 wall
+  textures against 34.
+- Even taking every byte of the chip that could be taken (the 92 KB where the original firmware's presets,
+  Felucca's autosave and the settings live) gives about 722 KB: still 108 KB short, before asking whether the
+  bigger level fits in 512 KB of RAM (not measured).
+- Conclusion: one level, E1M1, on this chip with this engine.
+
+### One-click game file (built, tested in a browser; not deployed)
+- Sean chose the option of the page fetching the shareware WAD itself.
+- Mirrors found and checked (each streamed through `shasum`, nothing saved): both serve the exact v1.9 file,
+  SHA-256 `1d7d43be…26cac771`, 4,196,020 B, with cross-site access allowed.
+  1. `https://cors.archive.org/cors/doom-shareware_1996/DOOM1.WAD` (the Internet Archive's cross-site endpoint;
+     the plain `archive.org/download/…` address sends no such header, so a page cannot read it). Found by
+     searching the Archive's file lists for the file's MD5.
+  2. `https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/f412706f…/doom1.wad` (pinned to a commit).
+- `site/frontend/src/lib/shareware.ts`: tries the mirrors in order, without cookies or referrer, streams with
+  progress, and accepts only the exact size and SHA-256. Anything else from a mirror is refused and the next
+  is tried; if none works the visitor is told to use their own copy.
+- The Game file step now offers "Fetch it" first and "drop your own" second. `connect-src` in
+  `site/security-headers.json` lists the two hosts (a test keeps it in step with `site.ts`).
+- VERIFIED in the Browser pane, development server and a production build under the real security headers: the
+  page downloaded the file from the Internet Archive, verified, cut, converted and packed it in 4.2–4.6 s; the
+  result is the tested data. 32 tests pass.
+- This is the first time the page contacts another host, and only on that button.
+
+## 2026-10-09 ~21:30 — Repository, licence, deploy set-up (nothing deployed)
+
+- VERIFIED (AWS, read-only calls): `deadlockinteractive.com` is registered at Amazon Registrar (auto-renew, to
+  2028-02), its hosted zone `Z07104152PEL021SX0LUQ` already exists and the registrar's name servers are that
+  zone's. The zone holds a Squarespace site's records (apex A, `www` CNAME, a verification CNAME): the CDK must
+  not create a zone and does not touch those; it adds `doom.` only. No CAA record, no existing certificate.
+  CDK bootstrap version 30 is in us-east-1 and us-west-2, and its roles trust the account.
+- `site/infra/cdk.context.json` now holds the real zone id (from `cdk synth`, a read-only look-up), so synth
+  needs no AWS access; CI runs it.
+- Deploy role: following beverage-chilling, a role of its own (`github-actions-deploy-fm1-doom`) made by
+  `scripts/setup-github-oidc.sh`, which Sean runs once. It may only assume the CDK bootstrap roles in the two
+  regions. The script asks GitHub for the repository's token subject form (new repositories use the immutable
+  one with ids). The shared `github-actions-deploy` role is not used and was not changed.
+- Workflows in beverage-chilling's style: `ci.yml` (pull requests: type check, tokens, tests, build, no game data
+  in the output, `cdk synth`) and `deploy.yml` (push to `main`: test gate, build, `cdk deploy`, smoke tests that
+  compare the live firmware and converter with the committed hashes).
+- Licence: Felucca is GPL-3.0-only (its `LICENSE`, `LICENSING.md`), which allows this use on condition that the
+  source of what is distributed is offered under the same licence. Added `LICENSE` (GPL-3.0), a `README.md` with
+  credits and the build's upstream versions, and `engine/`: our rp2040-doom work as a `git format-patch` series
+  on upstream `29a453c`, with `engine/get.sh`. VERIFIED: applying the series to a fresh checkout of that commit
+  gives the same tree as the local `fm1-port` branch (`9f6171d8…`).
+- QUEUED for the next firmware build (not done; no firmware was rebuilt): the firmware still names itself
+  "Felucca" on USB (Felucca's `usb.c`, string descriptor `STR2`, unmodified). That name is Hügelton Instruments'.
+  Rename to "FM-1 Doom"; Felucca's and our installer both find ports by `/fm-1|felucca|…/`, so either keeps working.
+
+## 2026-10-09 ~22:00 — Build "b6": the MASTER knob is the volume; the firmware names itself on USB (built and Mac-tested; NOT installed)
+
+Sean asked for both: a name that is not Felucca's, and the real volume knob.
+
+- VERIFIED from Felucca's source: MASTER is not an encoder but an analogue input, SARADC channel 4 on PB6
+  (`hal/fm1_adc.h`, `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023, a bounded wait, -1 on timeout). Felucca polls it from
+  its main loop once per screen frame, smooths it by an eighth per poll and maps it by a square law to a Q12 gain
+  (`master.c`, `fx.c master_of_pot`).
+- `firmware/dev_volume.h` (new, 14 host checks in `tests/volume_test.c`): the same mapping. `doom_dev.c` reads the
+  knob once before the audio starts (no glide: the first sound is at the knob's level), then once per game tic
+  from `dev_service`, **in game mode only**; the audio interrupt multiplies by the gain it finds. Full knob is
+  the old "100 %" (the mix shifted up 7 bits); the old fixed 5 % is the knob at about 22 %; the bottom of the
+  knob (readings 0..15) is silence. Safe mode reads no knob and makes no sound, as before.
+- VERIFIED in the disassembly: the audio loop is b5's with the constant 1638 replaced by the word at
+  `dev_gain_q12` and the shift 8 by 5 (same signed multiply, same arithmetic shift).
+- USB names. Felucca's `usb.c` reports manufacturer "Hügelton Instruments" and product "Felucca"; our firmware
+  compiled that file as it stood, so it claimed both. `firmware/gen_usb.py` (run by `build.sh`) now writes
+  `build/gen/usb.c`: Felucca's file with exactly those two string descriptors replaced (it refuses if either is
+  not found exactly once), and `build_in.sh` puts it first on the include path. Manufacturer "Deadlock
+  Interactive", product "FM-1 Doom". VERIFIED in the image: each new name once as a USB string, the old ones
+  not at all. The product name keeps "FM-1" in it because Felucca's and our installers pick MIDI ports by
+  `/fm-1|felucca|ota|…/`. During an update the device still shows as "Felucca Update": that is Felucca's own
+  loader, unmodified, under its own name.
+- b6: firmware 267,048 B (+240 B), recovery core id `c7618ad75e6ba239` (changed: the device unit changed), build
+  id `b5fc233a`; `doom_part1.fwsc` SHA-256 `b2ed37e8…6185b646`, `doom_code.fwsc` `fcd9fd37…757112c2`; data block 2
+  unchanged (`e4dcdbba…`, what the FM-1 holds). Block 1 has 19,416 B spare.
+- Checks: 17 package runs pass (`firmware/test.sh`, now with the volume test); the predicted flash after
+  installing b6 over b5 (138 of 143 app sectors change, nothing else) passes `check_dump.py` with the official
+  head. Symbols: `firmware/installed_b2ed37e8/`.
+- NOT VERIFIED until it runs on the FM-1: that the knob's direction and range feel right (the mapping is
+  Felucca's, so it should match the synth), that full volume does not distort on the speaker, and how the Mac
+  names the MIDI port after the change (it may keep showing the old name for a while).

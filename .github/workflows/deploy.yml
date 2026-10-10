@@ -1,0 +1,135 @@
+name: 🚀 Deploy to AWS
+
+# The site at doom.deadlockinteractive.com: site/frontend (Vite + React) on S3 + CloudFront, set up by site/infra
+# (CDK). The firmware and the data converter it serves are committed build outputs (site/sync_firmware.py), so
+# nothing here needs the firmware toolchain.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'site/**'
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Emergency deploy: skip the test gate'
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+# one deploy at a time; a newer push waits for the running one instead of racing it
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  AWS_REGION: 'us-west-2'
+  AWS_ROLE_ARN: 'arn:aws:iam::514220683169:role/github-actions-deploy-fm1-doom'
+  SITE_URL: 'https://doom.deadlockinteractive.com'
+
+jobs:
+  test:
+    name: 🧪 Tests
+    runs-on: ubuntu-latest
+    if: inputs.skip_tests != true
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: site/frontend/package-lock.json
+
+      - name: 🧪 Frontend
+        working-directory: site/frontend
+        run: npm ci && npm run type-check && npm run check:tokens && npm test
+
+  deploy:
+    name: 🏗️ Build and deploy
+    runs-on: ubuntu-latest
+    needs: test
+    # Proceed when tests passed, or when they were deliberately skipped — but never when they actually failed
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            site/frontend/package-lock.json
+            site/infra/package-lock.json
+
+      - name: 🔧 Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🏗️ Build frontend
+        working-directory: site/frontend
+        run: npm ci && npm run build
+
+      - name: 📥 Install CDK dependencies
+        working-directory: site/infra
+        run: npm ci
+
+      # The frontend stack uploads site/frontend/dist and invalidates CloudFront itself
+      - name: 🚀 Deploy with CDK
+        working-directory: site/infra
+        run: npx cdk deploy DoomSiteCertStack DoomSiteFrontendStack --require-approval never
+
+  smoke-tests:
+    name: 🧪 Smoke tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🧪 The page answers, with its security policy
+        run: |
+          # Retry: the first deploy has to wait for DNS, later ones for the CloudFront invalidation
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS -D headers.txt -o index.html "$SITE_URL/"; then
+              grep -qi '^content-security-policy:' headers.txt || { echo "❌ no content security policy header"; exit 1; }
+              grep -q '<div id="root">' index.html || { echo "❌ not the installer page"; exit 1; }
+              echo "✅ $SITE_URL answers"; exit 0
+            fi
+            echo "Attempt $i failed; waiting…"; sleep 20
+          done
+          echo "❌ $SITE_URL did not answer"; exit 1
+
+      - name: 🧪 The firmware and the converter are the committed ones
+        run: |
+          file=$(jq -r .file site/frontend/src/firmware.json)
+          want=$(jq -r .sha256 site/frontend/src/firmware.json)
+          got=$(curl -fsS "$SITE_URL/$file" | sha256sum | cut -d' ' -f1)
+          [ "$got" = "$want" ] || { echo "❌ $file: sha256 $got, expected $want"; exit 1; }
+          want=$(jq -r .converter_sha256 site/frontend/src/firmware.json)
+          got=$(curl -fsS "$SITE_URL/whdgen/whd_gen_es.wasm" | sha256sum | cut -d' ' -f1)
+          [ "$got" = "$want" ] || { echo "❌ converter: sha256 $got, expected $want"; exit 1; }
+          curl -fsS -o /dev/null "$SITE_URL/whdgen/whd_gen_es.js"
+          echo "✅ firmware and converter match"
+
+      - name: 📊 Deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Website URL:** $SITE_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Firmware build:** $(jq -r .version site/frontend/src/firmware.json)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployed at:** $(date)" >> $GITHUB_STEP_SUMMARY

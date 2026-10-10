@@ -1,0 +1,475 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Wed, 7 Oct 2026 23:44:31 -0700
+Subject: [PATCH 04/11] FM-1: sound, panel controls, one-level menus
+
+Audio: the stock mixer and OPL music run unchanged on a ring buffer
+(fm1_audio.c) that the output side reads with resampling. Controls:
+fm1_controls.c maps the FM-1's note keys, buttons and encoders to Doom
+keys. FM1 builds skip the episode menu, show only NEW GAME and OPTIONS,
+and return to the title when the level is finished.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/doom/g_game.c             |  5 ++
+ src/doom/m_menu.c             |  8 +++
+ src/fm1/fm1.h                 | 18 ++++++-
+ src/fm1/fm1_audio.c           | 95 +++++++++++++++++++++++++++++++++++
+ src/fm1/fm1_controls.c        | 89 ++++++++++++++++++++++++++++++++
+ src/fm1/fm1_platform.c        | 28 +++--------
+ src/fm1/fm1_sdk.c             |  6 +++
+ src/fm1/fm1_video.c           |  2 +
+ src/fm1/fm1_web.c             | 35 ++++++++-----
+ src/fm1/shim/pico/audio_i2s.h | 21 ++++++++
+ 10 files changed, 271 insertions(+), 36 deletions(-)
+ create mode 100644 src/fm1/fm1_audio.c
+ create mode 100644 src/fm1/fm1_controls.c
+ create mode 100644 src/fm1/shim/pico/audio_i2s.h
+
+diff --git a/src/doom/g_game.c b/src/doom/g_game.c
+index f38b5e5..029ffad 100644
+--- a/src/doom/g_game.c
++++ b/src/doom/g_game.c
+@@ -1512,6 +1512,11 @@ void G_DoCompleted (void)
+ 	 
+     if (automapactive) 
+ 	AM_Stop (); 
++
++#if FM1
++    D_StartTitle ();    /* one level, no intermission art: finishing it goes back to the title */
++    return;
++#endif
+ 	
+     if (gamemode != commercial)
+     {
+diff --git a/src/doom/m_menu.c b/src/doom/m_menu.c
+index a61968a..e7d822d 100644
+--- a/src/doom/m_menu.c
++++ b/src/doom/m_menu.c
+@@ -1117,6 +1117,10 @@ void M_NewGame(int choice)
+ #if NET_MENU
+     EpiDef.prevMenu = &MainDef;
+     netgame_choice = -1;
++#endif
++#if FM1
++    M_SetupNextMenu(&NewDef);       /* one level: no episode menu */
++    return;
+ #endif
+     if (gamemode == commercial || gameversion_is_chex(gameversion))
+ 	M_SetupNextMenu(&NewDef);
+@@ -2589,6 +2593,10 @@ void M_Init (void)
+ 
+     // The same hacks were used in the original Doom EXEs.
+ 
++#if FM1
++    MainDef.numitems = options + 1;  /* NEW GAME and OPTIONS only: no help pages, nothing to quit to */
++    NewDef.prevMenu = &MainDef;
++#endif
+     if (gameversion >= exe_ultimate)
+     {
+         MainMenu[readthis].routine = M_ReadThis2;
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index b15dfe3..b139480 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -8,12 +8,26 @@
+ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px);
+ // milliseconds since start
+ uint32_t fm1_millis(void);
+-// next key change: 1 and *doom_key / *down filled in, or 0 if none
+-int fm1_next_key(int *doom_key, int *down);
++// the panel now: note keys (bit 0 = F3 .. bit 26 = G5), buttons (bit = FM1_BTN_*, by printed label) and the
++// encoders' steps since the last call (+ = clockwise)
++enum { FM1_BTN_FX, FM1_BTN_SCL, FM1_BTN_ENV, FM1_BTN_LFO, FM1_BTN_EDIT, FM1_BTN_GLO, FM1_BTN_HOME, FM1_BTN_SAVE,
++       FM1_BTN_ARP, FM1_BTN_SEQ, FM1_BTN_PLAY, FM1_BTN_REC, FM1_BTN_OCTDN, FM1_BTN_OCTUP };
++enum { FM1_ENC_SELECT, FM1_ENC_ALGO, FM1_ENC_PRESET, FM1_ENC_K1, FM1_ENC_K2, FM1_ENC_K3, FM1_ENC_K4, FM1_NENC };
++void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NENC]);
++
++// fm1_controls.c: panel -> Doom keys
++void fm1_controls_init(void);
++void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NENC]);
++int fm1_next_key(int *doom_key, int *down);    // 1 and *doom_key / *down filled in, or 0 if none
+ // the game data (WHX) and the block the game heap lives in (it must end within 256 KB of the engine's
+ // short-pointed statics: see fm1_web_ram.c)
+ const uint8_t *fm1_whd_base(void);
+ uint8_t *fm1_heap(uint32_t *size);
+ 
++// sound (fm1_audio.c): fill the ring from the main loop; pull frames of 16-bit stereo at out_rate from the output side
++void fm1_audio_pump(void);
++void fm1_audio_read(int16_t *dst, uint32_t frames, uint32_t out_rate);
++extern uint32_t fm1_audio_underruns;
++
+ void fm1_present(void);                  // fm1_video.c: show the frame the game has finished
+ extern uint32_t fm1_frames;
+diff --git a/src/fm1/fm1_audio.c b/src/fm1/fm1_audio.c
+new file mode 100644
+index 0000000..df2ed34
+--- /dev/null
++++ b/src/fm1/fm1_audio.c
+@@ -0,0 +1,95 @@
++//
++// FM-1 audio: the mixer (src/pico/i_picosound.c) and the OPL music (opl/opl_pico.c) produce 16-bit stereo at
++// 49,716 Hz (the OPL chip's own rate) through pico-extras' "audio buffer" calls. Here those calls fill a ring
++// buffer from the main loop, and the output side (an audio interrupt on the device, the page in the browser)
++// pulls from it with fm1_audio_read(), which resamples to whatever rate the output runs at.
++//
++#include <string.h>
++#include "pico.h"
++#include "pico/audio_i2s.h"
++#include "i_sound.h"
++#include "fm1.h"
++
++#define FM1_AUDIO_RATE 49716u
++#define FM1_BUF_FRAMES 512u               /* one mixer pass */
++#define FM1_RING_FRAMES 4096u             /* power of 2: 82 ms */
++
++static int16_t fm1_mix[FM1_BUF_FRAMES * 2];
++static mem_buffer_t fm1_mem = { sizeof fm1_mix, (uint8_t *)fm1_mix, 0 };
++static audio_buffer_t fm1_buf;
++static int16_t fm1_ring[FM1_RING_FRAMES * 2];
++static volatile uint32_t fm1_w, fm1_r;    /* frame counters; the reader only moves fm1_r, the writer only fm1_w */
++static uint32_t fm1_phase;                /* resampler position between frame fm1_r and fm1_r + 1, 16.16 */
++static uint8_t fm1_audio_on;
++uint32_t fm1_audio_underruns;
++
++audio_buffer_pool_t *audio_new_producer_pool(audio_buffer_format_t *format, int buffer_count, int buffer_sample_count)
++{
++    (void)buffer_count; (void)buffer_sample_count;
++    fm1_buf.buffer = &fm1_mem;
++    fm1_buf.format = format;
++    fm1_buf.max_sample_count = FM1_BUF_FRAMES;
++    return (audio_buffer_pool_t *)&fm1_buf;
++}
++
++audio_buffer_t *take_audio_buffer(audio_buffer_pool_t *ac, bool block)
++{
++    (void)ac; (void)block;
++    if (FM1_RING_FRAMES - (fm1_w - fm1_r) < FM1_BUF_FRAMES + 2u)
++        return NULL;                      /* no room yet: the mixer skips this pass */
++    return &fm1_buf;
++}
++
++void give_audio_buffer(audio_buffer_pool_t *ac, audio_buffer_t *buffer)
++{
++    (void)ac;
++    for (uint32_t i = 0; i < buffer->sample_count; i++) {
++        uint32_t k = (fm1_w + i) & (FM1_RING_FRAMES - 1u);
++        fm1_ring[2u * k] = fm1_mix[2u * i];
++        fm1_ring[2u * k + 1u] = fm1_mix[2u * i + 1u];
++    }
++    fm1_w += buffer->sample_count;        /* published last */
++}
++
++const audio_format_t *audio_i2s_setup(const audio_format_t *intended_audio_format, const audio_i2s_config_t *config)
++{
++    (void)config;
++    return intended_audio_format;
++}
++bool audio_i2s_connect_extra(audio_buffer_pool_t *producer, bool buffer_on_give, uint buffer_count,
++                             uint samples_per_buffer, audio_connection_t *connection)
++{
++    (void)producer; (void)buffer_on_give; (void)buffer_count; (void)samples_per_buffer; (void)connection;
++    return true;
++}
++void audio_i2s_set_enabled(bool enabled) { fm1_audio_on = enabled; }
++
++// Fill the ring as far as it goes. The RP2040 version leans on its second core to call I_UpdateSound often;
++// with one core it is called once per shown frame from here (fm1_video.c) and in the engine's own wait loops.
++void fm1_audio_pump(void)
++{
++    for (int i = 0; i < 8 && FM1_RING_FRAMES - (fm1_w - fm1_r) >= FM1_BUF_FRAMES + 2u; i++)
++        I_UpdateSound();
++}
++
++// Output side: frames of 16-bit stereo at out_rate (linear interpolation from 49,716 Hz). Silence on underrun.
++void fm1_audio_read(int16_t *dst, uint32_t frames, uint32_t out_rate)
++{
++    uint32_t step = (uint32_t)(((uint64_t)FM1_AUDIO_RATE << 16) / out_rate);
++    for (uint32_t i = 0; i < frames; i++) {
++        if (!fm1_audio_on || fm1_w - fm1_r < 2u) {
++            dst[2u * i] = dst[2u * i + 1u] = 0;
++            if (fm1_audio_on)
++                fm1_audio_underruns++;
++            continue;
++        }
++        const int16_t *a = &fm1_ring[2u * (fm1_r & (FM1_RING_FRAMES - 1u))];
++        const int16_t *b = &fm1_ring[2u * ((fm1_r + 1u) & (FM1_RING_FRAMES - 1u))];
++        int32_t f = (int32_t)(fm1_phase >> 1);                           /* 0..32767 */
++        dst[2u * i] = (int16_t)(a[0] + (((b[0] - a[0]) * f) >> 15));
++        dst[2u * i + 1u] = (int16_t)(a[1] + (((b[1] - a[1]) * f) >> 15));
++        fm1_phase += step;
++        fm1_r += fm1_phase >> 16;
++        fm1_phase &= 0xFFFFu;
++    }
++}
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+new file mode 100644
+index 0000000..9473bfa
+--- /dev/null
++++ b/src/fm1/fm1_controls.c
+@@ -0,0 +1,89 @@
++//
++// FM-1 controls: the panel (27 note keys F3..G5, 14 buttons, 7 encoders) -> Doom key events.
++// The platform reports the panel as Felucca's HAL does (bit n of notes = key n, bit n of buttons = the button
++// with that printed label, encoder steps since the last poll, + = clockwise); this file owns the layout.
++//
++//   left hand, around the low A:      G#3 / A#3 forward     F#3 run
++//                                 G3 turn left   A3 back   B3 turn right        F3 / C4 strafe left / right
++//   right hand, top of the keyboard:  E5 / F5 fire          D5 / G5 use (open doors)   F#5 run
++//   buttons:  HOME menu (Esc)   PLAY select (Enter)   REC fire   OCT- / OCT+ previous / next weapon   FX yes
++//   knobs:    SELECT moves through menus (weapons while playing)   KNOB 4 previous / next weapon
++//
++#include "doomkeys.h"
++#include "doomtype.h"
++#include "m_controls.h"
++extern boolean menuactive;                                   /* doom/m_menu.c */
++#include "fm1.h"
++
++#define FM1_KEY_PREVWEAPON '['
++#define FM1_KEY_NEXTWEAPON ']'
++
++typedef struct { uint8_t src; uint8_t key; } fm1_map_t;       /* src: 0..26 note key, 32 + label = button */
++#define BTN(label) (32 + (label))
++static const fm1_map_t FM1_MAP[] = {
++    {3, KEY_UPARROW}, {5, KEY_UPARROW}, {2, KEY_LEFTARROW}, {4, KEY_DOWNARROW}, {6, KEY_RIGHTARROW},
++    {0, ','}, {7, '.'}, {1, KEY_RSHIFT}, {25, KEY_RSHIFT},
++    {23, KEY_RCTRL}, {24, KEY_RCTRL}, {21, ' '}, {26, ' '},
++    {BTN(FM1_BTN_HOME), KEY_ESCAPE}, {BTN(FM1_BTN_PLAY), KEY_ENTER}, {BTN(FM1_BTN_REC), KEY_RCTRL},
++    {BTN(FM1_BTN_OCTDN), FM1_KEY_PREVWEAPON}, {BTN(FM1_BTN_OCTUP), FM1_KEY_NEXTWEAPON}, {BTN(FM1_BTN_FX), 'y'},
++};
++#define FM1_NMAP (sizeof FM1_MAP / sizeof FM1_MAP[0])
++
++static uint8_t fm1_down[256 / 8];                             /* Doom keys currently held */
++static struct { uint8_t key, down; } fm1_q[64];
++static unsigned fm1_qr, fm1_qw;
++
++static void fm1_push(int key, int down)
++{
++    if (fm1_qw - fm1_qr >= 64u)
++        return;                                               /* full: drop (the state is re-derived next poll) */
++    fm1_q[fm1_qw & 63u].key = (uint8_t)key;
++    fm1_q[fm1_qw++ & 63u].down = (uint8_t)down;
++}
++
++static void fm1_tap(int key, int times)
++{
++    while (times-- > 0) {
++        fm1_push(key, 1);
++        fm1_push(key, 0);
++    }
++}
++
++void fm1_controls_init(void)
++{
++    key_prevweapon = FM1_KEY_PREVWEAPON;
++    key_nextweapon = FM1_KEY_NEXTWEAPON;
++}
++
++void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NENC])
++{
++    uint8_t want[256 / 8] = {0};
++    for (unsigned i = 0; i < FM1_NMAP; i++) {
++        unsigned s = FM1_MAP[i].src;
++        if (s < 32u ? (notes >> s) & 1u : (buttons >> (s - 32u)) & 1u)
++            want[FM1_MAP[i].key >> 3] |= (uint8_t)(1u << (FM1_MAP[i].key & 7u));
++    }
++    for (unsigned i = 0; i < FM1_NMAP; i++) {                 /* each mapped key once per change */
++        unsigned k = FM1_MAP[i].key, m = 1u << (k & 7u);
++        if ((want[k >> 3] ^ fm1_down[k >> 3]) & m) {
++            fm1_push((int)k, (want[k >> 3] & m) != 0);
++            fm1_down[k >> 3] ^= (uint8_t)m;
++        }
++    }
++    int sel = enc[FM1_ENC_SELECT], k4 = enc[FM1_ENC_K4];
++    if (menuactive) {
++        fm1_tap(sel > 0 ? KEY_DOWNARROW : KEY_UPARROW, sel > 0 ? sel : -sel);
++    } else {
++        k4 += sel;
++    }
++    fm1_tap(k4 > 0 ? FM1_KEY_NEXTWEAPON : FM1_KEY_PREVWEAPON, k4 > 0 ? k4 : -k4);
++}
++
++int fm1_next_key(int *doom_key, int *down)
++{
++    if (fm1_qr == fm1_qw)
++        return 0;
++    *doom_key = fm1_q[fm1_qr & 63u].key;
++    *down = fm1_q[fm1_qr++ & 63u].down;
++    return 1;
++}
+diff --git a/src/fm1/fm1_platform.c b/src/fm1/fm1_platform.c
+index 7b90c39..80fbf89 100644
+--- a/src/fm1/fm1_platform.c
++++ b/src/fm1/fm1_platform.c
+@@ -1,7 +1,7 @@
+ //
+ // FM-1 platform layer for the tiny Doom build: everything src/pico/* provided on the RP2040 except video
+-// (fm1_video.c). One CPU core: the semaphores the two-core design waits on run "the other core's" work
+-// inline instead of blocking. No sound yet (the sound and OPL drivers report "not available").
++// (fm1_video.c) and audio output (fm1_audio.c). One CPU core: the semaphores the two-core design waits on run
++// "the other core's" work inline instead of blocking.
+ //
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -122,6 +122,10 @@ void fm1_free(void *p) { Z_Free(p); }
+ void I_GetEvent(void)
+ {
+     int key, down;
++    uint32_t notes, buttons;
++    int8_t enc[FM1_NENC];
++    fm1_poll_panel(&notes, &buttons, enc);
++    fm1_controls_update(notes, buttons, enc);
+     while (fm1_next_key(&key, &down)) {
+         event_t ev = {0};
+         ev.type = down ? ev_keydown : ev_keyup;
+@@ -144,6 +148,7 @@ void I_Init(void)
+     // covers the engine's statics placed just under the heap (short pointer 0 is NULL, hence the "- 4")
+     fm1_shortptr_base = heap + n - 0x40000 - 4;
+     whd_map_base = fm1_whd_base();
++    fm1_controls_init();
+ }
+ void I_PrintBanner(const char *msg) { puts(msg); }
+ void I_PrintStartupBanner(const char *gamedescription) { puts(gamedescription); }
+@@ -154,25 +159,6 @@ void I_AtExit(atexit_func_t func, boolean run_on_error) { (void)func; (void)run_
+ void I_Quit(void) { panic("I_Quit"); for (;;) ; }
+ boolean I_GetMemoryValue(unsigned int offset, void *value, int size) { (void)offset; (void)value; (void)size; return false; }
+ 
+-// ------------------------------------------------------------------ sound: none yet
+-static boolean fm1_snd_init(boolean use_sfx_prefix) { (void)use_sfx_prefix; return false; }
+-static void fm1_snd_none(void) {}
+-sound_module_t sound_pico_module = { .Init = fm1_snd_init, .Shutdown = fm1_snd_none };
+-static int fm1_opl_init(unsigned int port_base) { (void)port_base; return 0; }
+-static unsigned int fm1_opl_read(opl_port_t port) { (void)port; return 0; }
+-static void fm1_opl_write(opl_port_t port, unsigned int value) { (void)port; (void)value; }
+-static void fm1_opl_callback(uint64_t us, opl_callback_t callback, void *data) { (void)us; (void)callback; (void)data; }
+-static void fm1_opl_paused(int paused) { (void)paused; }
+-static void fm1_opl_tempo(unsigned int old_tempo, unsigned int new_tempo) { (void)old_tempo; (void)new_tempo; }
+-// the music code writes OPL registers whether or not the driver came up: every entry must be callable
+-const opl_driver_t opl_pico_driver = { .name = "fm1-none", .init_func = fm1_opl_init, .shutdown_func = fm1_snd_none,
+-    .read_port_func = fm1_opl_read, .write_port_func = fm1_opl_write, .set_callback_func = fm1_opl_callback,
+-    .clear_callbacks_func = fm1_snd_none, .lock_func = fm1_snd_none, .unlock_func = fm1_snd_none,
+-    .set_paused_func = fm1_opl_paused, .adjust_callbacks_func = fm1_opl_tempo };
+-void I_PicoSoundFade(bool in) { (void)in; }
+-bool I_PicoSoundFading(void) { return false; }
+-void OPL_Delay(uint64_t us) { (void)us; }
+-
+ // ------------------------------------------------------------------ no link-cable network, no flash saves
+ boolean net_client_connected;
+ void piconet_init(void) {}
+diff --git a/src/fm1/fm1_sdk.c b/src/fm1/fm1_sdk.c
+index b20344b..358c791 100644
+--- a/src/fm1/fm1_sdk.c
++++ b/src/fm1/fm1_sdk.c
+@@ -26,3 +26,9 @@ static uint32_t fm1_lock;
+ spin_lock_t *spin_lock_instance(uint lock_num) { (void)lock_num; return (spin_lock_t *)&fm1_lock; }
+ uint32_t spin_lock_blocking(spin_lock_t *lock) { (void)lock; return 0; }
+ void spin_unlock(spin_lock_t *lock, uint32_t saved_irq) { (void)lock; (void)saved_irq; }
++
++// one thread of control: mutexes are free too (opl/opl_pico.c)
++#include "pico/mutex.h"
++void mutex_init(mutex_t *mtx) { (void)mtx; }
++void mutex_enter_blocking(mutex_t *mtx) { (void)mtx; }
++void mutex_exit(mutex_t *mtx) { (void)mtx; }
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index b127947..1100df8 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -614,6 +614,7 @@ static void fm1_squeeze(uint16_t *out, const uint16_t *in) {
+ 
+ void fm1_present(void) {
+     int out_y = 0, n = 0;
++    fm1_audio_pump();
+     new_frame_stuff();
+     if (!scanline_funcs[display_video_type])
+         return;                            /* text mode (start-up, ENDOOM): not shown on the FM-1 */
+@@ -656,6 +657,7 @@ void fm1_present(void) {
+     if (n)
+         fm1_lcd_blit(0, FM1_VIEW_Y + out_y, FM1_LCD_W, n, fm1_strip);
+     fm1_frames++;
++    fm1_audio_pump();
+ }
+ 
+ void I_InitGraphics(void)
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 0486c89..4f4faaf 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -10,8 +10,8 @@
+ #include "../tiny.whd.h"
+ 
+ static uint16_t fm1_lcd[240 * 240];
+-static int fm1_keys[64][2];
+-static unsigned fm1_kr, fm1_kw;
++static uint32_t fm1_notes, fm1_buttons;
++static int fm1_enc[FM1_NENC];
+ 
+ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px)
+ {
+@@ -19,20 +19,29 @@ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t
+         memcpy(&fm1_lcd[(y + r) * 240u + x], px + r * w, (x + w <= 240u ? w : 240u - x) * 2u);
+ }
+ uint32_t fm1_millis(void) { return (uint32_t)emscripten_get_now(); }
+-int fm1_next_key(int *doom_key, int *down)
++void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NENC])
+ {
+-    if (fm1_kr == fm1_kw)
+-        return 0;
+-    *doom_key = fm1_keys[fm1_kr & 63u][0];
+-    *down = fm1_keys[fm1_kr++ & 63u][1];
+-    return 1;
++    *notes = fm1_notes;
++    *buttons = fm1_buttons;
++    for (int i = 0; i < FM1_NENC; i++) {
++        enc[i] = (int8_t)fm1_enc[i];
++        fm1_enc[i] = 0;
++    }
+ }
+ const uint8_t *fm1_whd_base(void) { return tiny_whd; }
+ 
+-EMSCRIPTEN_KEEPALIVE void fm1_web_key(int doom_key, int down)
+-{
+-    fm1_keys[fm1_kw & 63u][0] = doom_key;
+-    fm1_keys[fm1_kw++ & 63u][1] = down;
+-}
++EMSCRIPTEN_KEEPALIVE void fm1_web_panel(uint32_t notes, uint32_t buttons) { fm1_notes = notes; fm1_buttons = buttons; }
++EMSCRIPTEN_KEEPALIVE void fm1_web_enc(int i, int steps) { if (i >= 0 && i < FM1_NENC) fm1_enc[i] += steps; }
++EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_underruns(void) { return fm1_audio_underruns; }
+ EMSCRIPTEN_KEEPALIVE uint16_t *fm1_web_lcd(void) { return fm1_lcd; }
+ EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_frames(void) { return fm1_frames; }
++
++// the page's audio callback: frames of 16-bit stereo at the AudioContext's rate
++static int16_t fm1_web_pcm[4096 * 2];
++EMSCRIPTEN_KEEPALIVE int16_t *fm1_web_audio(int frames, int rate)
++{
++    if (frames > 4096)
++        frames = 4096;
++    fm1_audio_read(fm1_web_pcm, (uint32_t)frames, (uint32_t)rate);
++    return fm1_web_pcm;
++}
+diff --git a/src/fm1/shim/pico/audio_i2s.h b/src/fm1/shim/pico/audio_i2s.h
+new file mode 100644
+index 0000000..b4859ef
+--- /dev/null
++++ b/src/fm1/shim/pico/audio_i2s.h
+@@ -0,0 +1,21 @@
++// FM-1 stand-in for pico-extras' pico/audio_i2s.h: the same calls, implemented by fm1_audio.c on a ring buffer
++// instead of an RP2040 PIO/DMA I2S output. Lets src/pico/i_picosound.c and opl/opl_pico.c compile unchanged.
++#pragma once
++#include "pico/audio.h"
++#ifdef __cplusplus
++extern "C" {
++#endif
++typedef struct audio_i2s_config {
++    uint8_t data_pin, clock_pin_base, dma_channel, pio_sm;
++} audio_i2s_config_t;
++const audio_format_t *audio_i2s_setup(const audio_format_t *intended_audio_format, const audio_i2s_config_t *config);
++bool audio_i2s_connect_extra(audio_buffer_pool_t *producer, bool buffer_on_give, uint buffer_count,
++                             uint samples_per_buffer, audio_connection_t *connection);
++void audio_i2s_set_enabled(bool enabled);
++#ifndef PICO_AUDIO_I2S_DATA_PIN
++#define PICO_AUDIO_I2S_DATA_PIN 0
++#define PICO_AUDIO_I2S_CLOCK_PIN_BASE 0
++#endif
++#ifdef __cplusplus
++}
++#endif

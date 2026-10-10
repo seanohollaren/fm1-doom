@@ -33,3 +33,12 @@ tiny.whd.h
 /tools/venv/
 /backups/
 /firmware/installed_*/
+# the installer site (site/): dependencies and build output; the firmware it serves IS committed (site/sync_firmware.py)
+node_modules/
+/site/frontend/dist/
+/site/frontend/dist-check/
+/site/frontend/dist-b6/
+/site/infra/cdk.out/
+/site/infra/**/*.js
+/site/infra/**/*.d.ts
+!/site/frontend/public/firmware/*.fwsc

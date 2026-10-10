@@ -6,8 +6,9 @@
 //     -> a package whose app slot holds firmware + a 64-byte descriptor + the first block of the data
 //     -> the second block, which the firmware writes to flash [0x93000, 0xE0000) itself
 //
-// Needs Felucca's fm1pkg.js (Package, crc16) in scope: the installer page inlines both files; web/test_data.js
-// loads them together.
+// (The single-file page, web/make_installer.py, inlines these modules into one script and drops the import lines.)
+
+import { crc16, Package } from "./vendor/felucca/fm1pkg.js";
 
 const APP_AREA_END = 0x93000;   // flash from here up reads unencrypted; the second block starts here
 const DATA_END = 0xE0000;       // the update staging area starts here

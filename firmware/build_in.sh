@@ -25,8 +25,10 @@ for f in $FILES; do
   $CC -Os -ffunction-sections -fdata-sections -fms-extensions -w -isystem /opt/jieli/pi32v2/include -include rp2040-doom/src/fm1/fm1_compat.h $D $X $I -c rp2040-doom/$f -o $o 2>$OUT/err.tmp || { echo "FAIL $f"; grep -m4 "error" $OUT/err.tmp; fail=1; }
 done
 F=Felucca/firmware
+# doom_dev.c includes "usb.c": the copy with our own USB names (firmware/gen_usb.py) must be the one it finds
+[ -f firmware/build/gen/usb.c ] || { echo "FAIL no firmware/build/gen/usb.c: run firmware/build.sh, which makes it"; exit 1; }
 $CC -c $F/crt0.S -o $OBJ/crt0.o && $CC -c $F/hal/fm1_vec.S -o $OBJ/fm1_vec.o && $CC -c $F/hal/fm1_isr.S -o $OBJ/fm1_isr.o || fail=1
-$CC -Os -ffunction-sections -fno-builtin -Wall -Wno-unused-function -I$F/hal -I$F/src -Irp2040-doom/src/fm1 -c firmware/doom_dev.c -o $OBJ/doom_dev.o 2>$OUT/err.tmp || { echo "FAIL doom_dev.c"; grep -m12 "error" $OUT/err.tmp; fail=1; }
+$CC -Os -ffunction-sections -fno-builtin -Wall -Wno-unused-function -Ifirmware/build/gen -I$F/hal -I$F/src -Irp2040-doom/src/fm1 -c firmware/doom_dev.c -o $OBJ/doom_dev.o 2>$OUT/err.tmp || { echo "FAIL doom_dev.c"; grep -m12 "error" $OUT/err.tmp; fail=1; }
 $CC -Os -ffunction-sections -fno-builtin -isystem /opt/jieli/pi32v2/include -c firmware/fm1_printf.c -o $OBJ/fm1_printf.o 2>$OUT/err.tmp || { echo "FAIL fm1_printf.c"; grep -m6 "error" $OUT/err.tmp; fail=1; }
 [ $fail = 0 ] || exit 1
 touch $STAMP

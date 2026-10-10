@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Wed, 7 Oct 2026 23:56:18 -0700
+Subject: [PATCH 06/11] FM-1: alternate two LCD strip buffers; browser test
+ hook for level exit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h       |  4 +++-
+ src/fm1/fm1_video.c | 13 ++++++++++---
+ src/fm1/fm1_web.c   |  4 ++++
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index d5a45cd..9d471c6 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -4,7 +4,9 @@
+ #pragma once
+ #include <stdint.h>
+ 
+-// LCD: w x h pixels at (x, y) on the 240x240 panel; RGB565 in the panel's byte order (high byte first)
++// LCD: w x h pixels at (x, y) on the 240x240 panel; RGB565 in the panel's byte order (high byte first).
++// The call may return while the pixels are still being sent: the caller leaves px alone until its NEXT
++// fm1_lcd_blit call has returned (fm1_video.c alternates two strip buffers).
+ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px);
+ // milliseconds since start
+ uint32_t fm1_millis(void);
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index 1100df8..4390e0c 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -596,10 +596,13 @@ void __no_inline_not_in_flash_func(new_frame_stuff)() {
+ #define FM1_LCD_W 240
+ #define FM1_VIEW_H 150                     /* 200 lines, 3 of every 4 kept */
+ #define FM1_VIEW_Y ((240 - FM1_VIEW_H) / 2)
+-#define FM1_STRIP_H 10                     /* lines per LCD transfer (4.8 KB) */
++#define FM1_STRIP_H 8                      /* lines per LCD transfer (3.8 KB) */
+ 
+ static uint32_t fm1_line[SCREENWIDTH / 2 + 2];             /* one composed scanline, RGB565 (word aligned) */
+-static uint16_t fm1_strip[FM1_LCD_W * FM1_STRIP_H];
++// two strip buffers, used in turn: the platform may still be sending one (DMA) while the next is composed.
++// fm1_lcd_blit's pixels must stay untouched until the following fm1_lcd_blit call has returned.
++static uint16_t fm1_strips[2][FM1_LCD_W * FM1_STRIP_H];
++static uint8_t fm1_strip_i;
+ uint32_t fm1_frames;
+ 
+ // 4 source pixels -> 3: the outer two as they are, the inner two averaged; bytes swapped for the panel
+@@ -614,6 +617,7 @@ static void fm1_squeeze(uint16_t *out, const uint16_t *in) {
+ 
+ void fm1_present(void) {
+     int out_y = 0, n = 0;
++    uint16_t *fm1_strip = fm1_strips[fm1_strip_i];
+     fm1_audio_pump();
+     new_frame_stuff();
+     if (!scanline_funcs[display_video_type])
+@@ -650,12 +654,15 @@ void fm1_present(void) {
+         fm1_squeeze(fm1_strip + n * FM1_LCD_W, dest);
+         if (++n == FM1_STRIP_H) {
+             fm1_lcd_blit(0, FM1_VIEW_Y + out_y, FM1_LCD_W, n, fm1_strip);
++            fm1_strip = fm1_strips[fm1_strip_i ^= 1];
+             out_y += n;
+             n = 0;
+         }
+     }
+-    if (n)
++    if (n) {
+         fm1_lcd_blit(0, FM1_VIEW_Y + out_y, FM1_LCD_W, n, fm1_strip);
++        fm1_strip_i ^= 1;
++    }
+     fm1_frames++;
+     fm1_audio_pump();
+ }
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 2506213..389f693 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -45,3 +45,7 @@ EMSCRIPTEN_KEEPALIVE int16_t *fm1_web_audio(int frames, int rate)
+     fm1_audio_read(fm1_web_pcm, (uint32_t)frames, (uint32_t)rate);
+     return fm1_web_pcm;
+ }
++
++// test hook: finish the level as the exit switch would (the page's console: Module._fm1_web_exit_level())
++void G_ExitLevel(void);
++EMSCRIPTEN_KEEPALIVE void fm1_web_exit_level(void) { G_ExitLevel(); }

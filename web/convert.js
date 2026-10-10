@@ -2,7 +2,10 @@
 // FM-1 Doom: from a Doom WAD the user picked to something installable, all in the browser.
 //   cutWad (wadcut.js)  ->  whd_gen (rp2040-doom's converter, compiled to WebAssembly: web/build_whdgen.sh)
 //   ->  buildInstall (datapack.js)
-// Needs wadcut.js, datapack.js and Felucca's fm1pkg.js in scope (the installer page inlines them all).
+
+import { sha256hex } from "./vendor/felucca/fm1pkg.js";
+import { cutWad } from "./wadcut.js";
+import { buildInstall } from "./datapack.js";
 
 // The one input whose result has run on a real FM-1: the shareware DOOM1.WAD, version 1.9 (4,196,020 bytes).
 export const SHAREWARE_19_SHA256 = "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771";

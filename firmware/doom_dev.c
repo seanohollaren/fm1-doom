@@ -67,7 +67,7 @@ struct { uint32_t magic, failed, pending; } bootguard __attribute__((section(".n
 
 #include "libc.c"
 #include "lcd.c"
-#include "usb.c"
+#include "usb.c"                          /* Felucca's, with our own USB names: firmware/gen_usb.py writes build/gen/usb.c */
 #include "fm1_flash.h"
 
 #include "fm1.h"                         /* the game's platform interface */
@@ -106,11 +106,33 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
 #define HALF_FRAMES 128u
 #define HALF_WORDS (HALF_FRAMES * 2u)
 #define OUT_RATE 44118u                  /* the I2S frame rate Felucca measured: 24 MHz / 544 */
-#define DEV_VOLUME_PCT 5                 /* fixed for now: the volume knob is not read yet. 100 = the 16-bit mix shifted
-                                          * up 7 bits into the codec's 24-bit words, Felucca's -6 dBFS ceiling */
-#define DEV_GAIN_Q8 ((128 * 256 * DEV_VOLUME_PCT) / 100)
+#include "dev_volume.h"                  /* the MASTER knob -> gain, as Felucca maps it */
+static volatile uint32_t dev_gain_q12;   /* what the audio interrupt multiplies by; written by the game loop only */
+static int32_t dev_knob16;               /* the knob x16, smoothed */
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static int16_t apcm[HALF_WORDS];
+
+/* before the audio starts: the knob as it stands, no glide (as Felucca's master_boot; the first conversion after
+ * the pin set-up is dropped). No reading at all: silent until the game loop's polls get one. */
+static void dev_volume_boot(void)
+{
+    uint32_t i;
+    (void)fm1_adc_read(FM1_ADC_MASTER);
+    for (i = 0; i < 3u; i++) {
+        int32_t a = fm1_adc_read(FM1_ADC_MASTER);
+        if (a >= 0) {
+            dev_knob16 = a * 16;
+            dev_gain_q12 = dv_gain((uint32_t)a);
+            return;
+        }
+    }
+}
+/* once per game tic, from the game loop (a conversion is a bounded wait: fm1_adc_read gives up after 20000 spins) */
+static void dev_volume_poll(void)
+{
+    dev_knob16 = dv_smooth(dev_knob16, fm1_adc_read(FM1_ADC_MASTER));
+    dev_gain_q12 = dv_gain((uint32_t)(dev_knob16 / 16));
+}
 
 void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
 {
@@ -118,10 +140,10 @@ void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
     fm1_audio_ack_aux(p);
     if (p & FM1_AUDIO_HALF) {
         int32_t *o = &abuf[fm1_audio_free_half() * HALF_WORDS];
-        uint32_t i;
+        uint32_t i, g = dev_gain_q12;
         fm1_audio_read(apcm, HALF_FRAMES, OUT_RATE);         /* resampled from the game's ring (fm1_audio.c) */
         for (i = 0; i < HALF_WORDS; i++)
-            o[i] = ((int32_t)apcm[i] * DEV_GAIN_Q8) >> 8;
+            o[i] = dv_sample(apcm[i], g);
         fm1_audio_ack_half();
     }
 }
@@ -287,6 +309,7 @@ static void dev_service(void)
             bootguard.pending = 0;       /* this start survived its first 30 s (as Felucca) */
             bootguard.failed = 0;
         }
+        dev_volume_poll();               /* game mode only: safe mode makes no sound and reads no knob */
     } else if (dev_host_seen)
         bootguard.pending = 0;           /* safe mode: reachable only once a host was heard; the failure count is
                                           * kept, so it stays in safe mode across resets */
@@ -564,6 +587,7 @@ void fm1_cstart(void)
     if (dev_mode == MODE_GAME) {         /* the audio interrupt has to be attached before the vectors are locked */
         fm1_wdt_arm(0x0F);               /* ~32 s: a level load must not look like a hang */
         audio_silence();
+        dev_volume_boot();               /* the first sound plays at the knob's level */
         fm1_audio_init(abuf, HALF_WORDS, isr_alnk0, 3);
     }
     usb_start();

@@ -1,0 +1,183 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Fri, 9 Oct 2026 13:03:00 -0700
+Subject: [PATCH 08/11] FM-1: game data in two blocks, watchdog proof-of-life
+ hook, cheaper resampler set-up
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |  4 ++++
+ src/fm1/fm1_audio.c    |  6 +++++-
+ src/fm1/fm1_platform.c |  8 +++++---
+ src/fm1/fm1_video.c    |  3 ++-
+ src/fm1/fm1_web.c      | 32 +++++++++++++++++++++++++++++++-
+ src/w_file_memory.c    |  2 ++
+ src/w_wad.h            | 10 ++++++++++
+ 7 files changed, 59 insertions(+), 6 deletions(-)
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index 9d471c6..240874d 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -24,6 +24,10 @@ int fm1_next_key(int *doom_key, int *down);    // 1 and *doom_key / *down filled
+ // the game data (WHX) and the block the game heap lives in (it must end within 256 KB of the engine's
+ // short-pointed statics: see fm1_web_ram.c)
+ const uint8_t *fm1_whd_base(void);
++// the data file's second block and the file offset it starts at; NULL (and *split untouched) if it is in one piece
++const uint8_t *fm1_whd_part2(uint32_t *split);
++// called often from the game's loops (every shown frame, every clock read): proof of life for a watchdog
++void fm1_alive(void);
+ uint8_t *fm1_heap(uint32_t *size);
+ 
+ // sound (fm1_audio.c): fill the ring from the main loop; pull frames of 16-bit stereo at out_rate from the output side
+diff --git a/src/fm1/fm1_audio.c b/src/fm1/fm1_audio.c
+index df2ed34..ab98b03 100644
+--- a/src/fm1/fm1_audio.c
++++ b/src/fm1/fm1_audio.c
+@@ -75,7 +75,11 @@ void fm1_audio_pump(void)
+ // Output side: frames of 16-bit stereo at out_rate (linear interpolation from 49,716 Hz). Silence on underrun.
+ void fm1_audio_read(int16_t *dst, uint32_t frames, uint32_t out_rate)
+ {
+-    uint32_t step = (uint32_t)(((uint64_t)FM1_AUDIO_RATE << 16) / out_rate);
++    static uint32_t rate, step;                       /* 16.16 input frames per output frame, worked out once per rate */
++    if (out_rate != rate) {
++        rate = out_rate;
++        step = (uint32_t)(((uint64_t)FM1_AUDIO_RATE << 16) / out_rate);
++    }
+     for (uint32_t i = 0; i < frames; i++) {
+         if (!fm1_audio_on || fm1_w - fm1_r < 2u) {
+             dst[2u * i] = dst[2u * i + 1u] = 0;
+diff --git a/src/fm1/fm1_platform.c b/src/fm1/fm1_platform.c
+index 3b19fc2..123fd21 100644
+--- a/src/fm1/fm1_platform.c
++++ b/src/fm1/fm1_platform.c
+@@ -29,7 +29,8 @@
+ #if FM1_SHORTPTR_VAR
+ unsigned char *fm1_shortptr_base;
+ #endif
+-extern const uint8_t *whd_map_base;
++extern const uint8_t *whd_map_base, *whd_map_base2;
++extern uint32_t whd_split;
+ extern semaphore_t render_frame_ready, display_frame_freed;
+ void D_DoomMain(void);
+ 
+@@ -91,8 +92,8 @@ bool sem_acquire_timeout_ms(semaphore_t *sem, uint32_t timeout_ms)
+ 
+ // ------------------------------------------------------------------ time
+ uint32_t time_us_32(void) { return fm1_millis() * 1000u; }
+-int I_GetTime(void) { return (int)(((uint64_t)fm1_millis() * TICRATE) / 1000u); }
+-int I_GetTimeMS(void) { return (int)fm1_millis(); }
++int I_GetTime(void) { fm1_alive(); return (int)(((uint64_t)fm1_millis() * TICRATE) / 1000u); }
++int I_GetTimeMS(void) { fm1_alive(); return (int)fm1_millis(); }
+ void I_Sleep(int ms)
+ {
+     uint32_t t0 = fm1_millis();
+@@ -152,6 +153,7 @@ void I_Init(void)
+     fm1_shortptr_base = heap + n - 0x40000 - 4;
+ #endif
+     whd_map_base = fm1_whd_base();
++    whd_map_base2 = fm1_whd_part2(&whd_split);
+     fm1_controls_init();
+ }
+ void I_PrintBanner(const char *msg) { puts(msg); }
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index 4390e0c..9c1861f 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -596,7 +596,7 @@ void __no_inline_not_in_flash_func(new_frame_stuff)() {
+ #define FM1_LCD_W 240
+ #define FM1_VIEW_H 150                     /* 200 lines, 3 of every 4 kept */
+ #define FM1_VIEW_Y ((240 - FM1_VIEW_H) / 2)
+-#define FM1_STRIP_H 8                      /* lines per LCD transfer (3.8 KB) */
++#define FM1_STRIP_H 4                      /* lines per LCD transfer (1.9 KB each, two buffers) */
+ 
+ static uint32_t fm1_line[SCREENWIDTH / 2 + 2];             /* one composed scanline, RGB565 (word aligned) */
+ // two strip buffers, used in turn: the platform may still be sending one (DMA) while the next is composed.
+@@ -618,6 +618,7 @@ static void fm1_squeeze(uint16_t *out, const uint16_t *in) {
+ void fm1_present(void) {
+     int out_y = 0, n = 0;
+     uint16_t *fm1_strip = fm1_strips[fm1_strip_i];
++    fm1_alive();
+     fm1_audio_pump();
+     new_frame_stuff();
+     if (!scanline_funcs[display_video_type])
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 389f693..29eef78 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -28,7 +28,37 @@ void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB])
+         fm1_enc[i] = 0;
+     }
+ }
+-const uint8_t *fm1_whd_base(void) { return tiny_whd; }
++// The firmware stores the data file as two blocks. Do the same here, split at the lump boundary nearest the
++// middle, the two copies far apart and 64 KB of 0xA5 after the first: a read across the split shows at once.
++#undef malloc                             /* the build maps malloc to the game's own heap: these two blocks are not game memory */
++void *malloc(unsigned long);
++static uint8_t *fm1_part1, *fm1_part2;
++static uint32_t fm1_split = 0xFFFFFFFFu;
++static void fm1_web_split(void)
++{
++    uint32_t n, table, best = 0, total = sizeof tiny_whd;
++    if (fm1_part1)
++        return;
++    memcpy(&n, tiny_whd + 4, 4);
++    memcpy(&table, tiny_whd + 8, 4);
++    for (uint32_t i = 0; i <= n; i++) {                       /* lump offsets, low 24 bits; the last entry is the end */
++        uint32_t off;
++        memcpy(&off, tiny_whd + table + 4u * i, 4);
++        off &= 0xFFFFFFu;
++        if (off <= total / 2u && off > best)
++            best = off;
++    }
++    fm1_split = best;
++    fm1_part1 = malloc(best + 65536u);
++    memcpy(fm1_part1, tiny_whd, best);
++    memset(fm1_part1 + best, 0xA5, 65536u);
++    fm1_part2 = malloc(total - best);
++    memcpy(fm1_part2, tiny_whd + best, total - best);
++}
++const uint8_t *fm1_whd_base(void) { fm1_web_split(); return fm1_part1; }
++const uint8_t *fm1_whd_part2(uint32_t *split) { fm1_web_split(); *split = fm1_split; return fm1_part2; }
++void fm1_alive(void) {}
++EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_split_at(void) { return fm1_split; }
+ 
+ EMSCRIPTEN_KEEPALIVE void fm1_web_panel(uint32_t notes, uint32_t buttons) { fm1_notes = notes; fm1_buttons = buttons; }
+ EMSCRIPTEN_KEEPALIVE void fm1_web_enc(int i, int steps) { if (i >= 0 && i < FM1_NKNOB) fm1_enc[i] += steps; }
+diff --git a/src/w_file_memory.c b/src/w_file_memory.c
+index 635324c..a2d1f5f 100644
+--- a/src/w_file_memory.c
++++ b/src/w_file_memory.c
+@@ -54,6 +54,8 @@ bi_decl(bi_program_feature(ADDR_FNAME));
+ #else
+ #if FM1
+ const uint8_t *whd_map_base;   /* set by the platform before D_DoomMain (fm1_platform.c) */
++const uint8_t *whd_map_base2;  /* second block and the offset it starts at (w_wad.h lump_data) */
++uint32_t whd_split = 0xFFFFFFFFu;
+ #else
+ #if !PICO_ON_DEVICE
+ #include "tiny.whd.h"
+diff --git a/src/w_wad.h b/src/w_wad.h
+index d9594c1..6eeb68f 100644
+--- a/src/w_wad.h
++++ b/src/w_wad.h
+@@ -95,9 +95,19 @@ extern const uint8_t *whd_map_base;
+ static inline should_be_const uint8_t *lump_data(const lumpinfo_t *lump) {
+ #if !USE_WHD
+     return (const uint8_t *)lump->mem;
++#else
++#if FM1
++    // FM-1: the data file may be stored in two blocks (flash has no single run long enough: see firmware/pack.py).
++    // Offsets below whd_split are in the first block, the rest in the second. The split is on a lump boundary,
++    // and this function is the only place an offset becomes a pointer, so no lump is ever read across it.
++    extern const uint8_t *whd_map_base2;
++    extern uint32_t whd_split;
++    uint32_t off = (*lump)&0xffffffu;
++    return off < whd_split ? whd_map_base + off : whd_map_base2 + (off - whd_split);
+ #else
+     return whd_map_base + ((*lump)&0xffffffu);
+ #endif
++#endif
+ }
+ #endif
+ 

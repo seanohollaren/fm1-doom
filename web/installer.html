@@ -188,11 +188,7 @@ const site = /*META*/;
 const $ = (id) => document.getElementById(id);
 const say = (s) => { $("say").textContent = s; };
 const log = (s) => { $("log").textContent += s + "\n"; };
-const QUERY = 2, FORCE = 1;
 const force = new URLSearchParams(location.search).get("force") === "1";
-const le32 = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
-const rd32 = (u, i) => (u[i] | (u[i + 1] << 8) | (u[i + 2] << 16) | (u[i + 3] << 24)) >>> 0;
-const MODES = ["game", "safe (last start failed)", "safe (HOME held)", "safe (no data)", "safe (second block missing)"];
 const kb = (n) => Math.round(n / 1024) + " KB";
 
 // ---- step 1: the game data. base = the firmware-only package; after a file is prepared: image, data2, meta
@@ -264,56 +260,21 @@ $("datacard").addEventListener("drop", (e) => { const f = e.dataTransfer && e.da
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => e.preventDefault());
 
-// ---- step 2: the install. The four stages and the one bar: stage(n, "now" | "done" | "fail" | "", note)
-let current = 0;
+// ---- step 2: the install (web/install.js does it; this paints its events)
 function stage(n, state, note) {
   $("st" + n).className = "stage" + (state ? " " + state : "");
   $("st" + n + "d").textContent = state === "done" ? "✓" : state === "fail" ? "!" : String(n);
   if (note !== undefined) $("st" + n + "n").textContent = note;
-  if (state === "now") current = n;
 }
 function bar(f, state) {
-  const p = Math.max(0, Math.min(100, Math.round(f * 100)));
-  $("bar").style.width = p + "%";
-  $("bar").className = "fill" + (state ? " " + state : "");
-  $("pct").textContent = p + "%";
-}
-function reset() { for (let n = 1; n <= 4; n++) stage(n, "", ""); current = 0; bar(0); }
-
-// one message of the update protocol: 00 59 cmd len24 body ~sum(body), 7-bit packed between F0 and F7
-function frame(cmd, body) {
-  const d = [0x00, 0x59, cmd, body.length & 255, (body.length >> 8) & 255, (body.length >> 16) & 255, ...body];
-  let s = 0;
-  for (const b of body) s += b;
-  d.push(~s & 255);
-  return [0xF0, ...pack7(d), 0xF7];
-}
-function parseDataReply(pkt) {
-  if (pkt[0] !== 0xF0 || pkt[pkt.length - 1] !== 0xF7) return null;
-  const u = unpack7(pkt.slice(1, -1));
-  if (u.length < 27 || u[0] !== 0 || u[1] !== 0x59 || u[2] !== 0x44 || (u[3] | (u[4] << 8) | (u[5] << 16)) !== 20) return null;
-  let s = 0;
-  for (let i = 6; i < 26; i++) s += u[i];
-  if ((~s & 255) !== u[26]) return null;
-  return { code: u[6], mode: u[7], flash: u[8], total: rd32(u, 10), split: rd32(u, 14), crc2: rd32(u, 18), build: rd32(u, 22) };
-}
-// ask the Doom firmware about its second data block (flags: QUERY = only answer, FORCE = rewrite even if it matches)
-async function ask(link, flags) {
-  link.drain();
-  for (let t = 0; t < 3; t++) {
-    if (!link.send(frame(0x44, [...le32(data2.length), ...le32(meta.data2_crc16), ...le32(flags)]))) return null;
-    const end = Date.now() + 1500;
-    while (Date.now() < end) {
-      const p = await link.read(end - Date.now());
-      if (!p) break;
-      const r = parseDataReply(p);
-      if (r) { log(`data reply: code ${r.code}, mode ${MODES[r.mode] || r.mode}, build ${r.build.toString(16)}`); return r; }
-    }
+  if (f !== null) {
+    const p = Math.max(0, Math.min(100, Math.round(f * 100)));
+    $("bar").style.width = p + "%";
+    $("pct").textContent = p + "%";
   }
-  return null;
+  $("bar").className = "fill" + (state ? " " + state : "");
 }
-const mine = (r) => r && r.build === meta.build && r.total === meta.total && r.split === meta.split && r.crc2 === meta.data2_crc16;
-function stop(msg) { const e = new Error(msg); e.shown = true; return e; }
+function reset() { for (let n = 1; n <= 4; n++) stage(n, "", ""); bar(0); }
 
 window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "Writing. Do not close the page."; } });
 
@@ -329,7 +290,7 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
   }
   if (!canMidi) say("This browser can't talk to the FM-1. Open the page in Chrome or Edge on a computer.");
   try {
-    if (JSON.stringify(frame(0x11, [])) !== JSON.stringify([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])) throw new Error("self-check failed");
+    if (!selfCheck()) throw new Error("self-check failed");
     const r = await fetch(site.pkg);
     if (!r.ok) throw new Error(`${site.pkg}: HTTP ${r.status}`);
     const pkg = new Uint8Array(await r.arrayBuffer());
@@ -345,80 +306,12 @@ $("go").addEventListener("click", async () => {
   let midi;
   try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
   catch (e) { writing = false; gate(); say("MIDI access was not allowed. Allow MIDI for this site in the address bar, then press Install again."); return; }
-  try {
-    const up = new Updater(midi, () => {});
-    // the bar: stage 1 to 4 %, stage 2 to 60 %, stage 3 to 97 %, 100 % when the game answers
-    const N1 = 74 + 1167, N2 = Math.ceil(data2.length / 512);
-    let last = "";
-    const step = (k, a) => {
-      if (k !== last) { log(`${k}${a !== undefined && typeof a !== "number" ? " " + a : ""}`); last = k; }
-      if (k === "verify") { say("Checking the firmware file with the FM-1"); bar(0.04 + 0.56 * a / N1); }
-      if (k === "loader") say("Switching to update mode. The FM-1's screen goes dark for a while.");
-      if (k === "write") { say("Writing the firmware. Don't unplug the FM-1."); bar(0.04 + 0.56 * (74 + a) / N1); }
-      if (k === "reboot") say("Restarting the FM-1");
-    };
-    stage(1, "now"); say("Looking for the FM-1");
-    // an update loader left waiting by an interrupted install: finish that first
-    const ota = await up.find((id) => /^ota-/i.test(id.model));
-    if (ota) {
-      ota.link.close();
-      log("found an FM-1 waiting in update mode: resuming");
-      stage(1, "done", "in update mode"); stage(2, "now"); bar(0.04);
-      if (!(await up.resume(image, step, meta.product))) throw stop("The update stopped. Replug the USB cable and press Install again.");
-      stage(2, "done");
-    } else {
-      const dev = await up.find((id) => !/^ota-/i.test(id.model));
-      if (!dev) throw stop("FM-1 not found. Check that the USB cable carries data, close other apps that use MIDI, and press Install again.");
-      log(`found ${dev.id.text} on "${dev.name}"`);
-      let have = false;
-      if (dev.id.text === meta.product) have = mine(await ask(dev.link, QUERY));   // only our own firmware is asked
-      dev.link.close();
-      stage(1, "done"); stage(2, "now"); bar(0.04);
-      if (have) { log("this firmware build and this game data's first block are already installed: stage 2 skipped"); stage(2, "done", "already installed"); }
-      else { await up.install(image, meta.product, step); stage(2, "done"); }
-    }
-    bar(0.6); stage(3, "now");
-    // the second block of the game data, written by the firmware itself
-    for (let round = 0; ; round++) {
-      say(round ? "Restarting the FM-1" : "Looking for the new firmware");
-      await sleep(round ? 3000 : 500);
-      const dev = await up.waitFor((id) => id.text === meta.product, 40000);
-      if (!dev) throw stop("The FM-1 did not come back. Switch it off and on, then press Install again.");
-      const q = await ask(dev.link, QUERY);
-      if (!q) { dev.link.close(); throw stop("The firmware did not answer the question about its game data. Press Install again."); }
-      if (!mine(q)) { dev.link.close(); throw stop("The FM-1 reports a different build than this page installs. Press Install again."); }
-      if (q.code === 1 && !(force && round === 0)) {
-        dev.link.close();
-        stage(3, "done", round ? "" : "already there"); stage(4, "done"); bar(1, "done");
-        say("Done. Doom is running on the FM-1.");
-        break;
-      }
-      if (q.code === 1) { dev.link.close(); throw stop("Test mode needs the safe screen: switch the FM-1 off, hold HOME, switch it on, then press Install again."); }
-      if (q.code !== 0) { dev.link.close(); throw stop(q.code === 3 ? "The FM-1's flash chip is not the expected one. Nothing was written." : "The firmware refused the game data (code " + q.code + ")."); }
-      if (round >= 2) { dev.link.close(); throw stop("The game data was sent twice and the game still does not start. Press Install again, or report this."); }
-      const go = await ask(dev.link, force && round === 0 ? FORCE : 0);
-      if (!go || go.code !== 0) { dev.link.close(); throw stop("The firmware did not start taking the game data. Press Install again."); }
-      say("Sending the game data. Don't unplug the FM-1.");
-      const s = await up.serve(dev.link, data2, 0xF0000000, 30000, (n) => { bar(0.6 + 0.37 * Math.min(1, n / N2)); });
-      dev.link.close();
-      log(`data: ${s.served} requests served, finished ${s.finished}`);
-      if (!s.finished) throw stop(s.lost ? "The USB connection was lost while sending the game data. Replug it and press Install again." :
-                                          "The FM-1 stopped asking for the game data. Press Install again; it carries on where it was.");
-      stage(3, "done"); stage(4, "now"); bar(0.97);
-    }
-  } catch (e) {
-    const T = { notfound: "FM-1 not found. Check that the USB cable carries data, close other apps that use MIDI, and press Install again.",
-                model: "The connected device is not an FM-1.", stopped: "The update stopped before anything was written. Replug the USB cable and press Install again.",
-                lost: "The USB connection was lost. Replug it and press Install again.",
-                noloader: "The FM-1 did not appear in update mode. Replug the USB cable and press Install again; it stays in update mode until the update is finished.",
-                noreturn: "The FM-1 did not come back. Switch it off and on, then press Install again.",
-                mismatch: "The firmware was written, but the FM-1 reports another version: " + (e && e.detail || "") };
-    const msg = e && e.shown ? e.message : e && e.code && T[e.code] ? T[e.code] : "Something went wrong: " + (e && e.message);
-    log(String(e && e.stack || e));
-    if (current) stage(current, "fail");
-    $("bar").className = "fill fail";
-    say(msg);
-  }
+  await install({ midi, image, data2, meta, force, on: (ev) => {
+    if (ev.t === "stage") stage(ev.n, ev.state, ev.note);
+    else if (ev.t === "bar") bar(ev.f, ev.state);
+    else if (ev.t === "say") say(ev.text);
+    else if (ev.t === "log") log(ev.text);
+  } });
   writing = false; gate(true);
 });
 </script></main></body></html>

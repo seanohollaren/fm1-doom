@@ -33,7 +33,9 @@ LICENCES = [
     (FEL / "LICENSES" / "Apache-2.0.txt", "Apache-2.0.txt", "three JieLi AC79 SDK files inside the firmware file"),
     (ROOT / "rp2040-doom" / "src" / "adpcm-xq" / "license.txt", "BSD-3-Clause-adpcm-xq.txt", "the sound encoder inside the data converter"),
 ]
-SCRIPTS = [FEL / "web" / "fm1pkg.js", FEL / "web" / "fm1ota.js", ROOT / "web" / "wadcut.js", ROOT / "web" / "datapack.js", ROOT / "web" / "convert.js"]
+WEB = ROOT / "web"
+SCRIPTS = [WEB / "vendor" / "felucca" / "fm1pkg.js", WEB / "vendor" / "felucca" / "fm1ota.js", WEB / "wadcut.js", WEB / "datapack.js", WEB / "convert.js",
+           WEB / "install.js"]
 
 
 def strip_module(src):                      # as Felucca's web/make_site.py

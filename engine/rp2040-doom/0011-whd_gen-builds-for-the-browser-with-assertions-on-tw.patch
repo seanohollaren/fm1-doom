@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Fri, 9 Oct 2026 19:07:18 -0700
+Subject: [PATCH 11/11] whd_gen: builds for the browser with assertions on; two
+ fixes found with Freedoom
+
+- config.h: LOOKAHEAD can be set from the command line, so a build with assertions
+  (-DLOOKAHEAD=5) writes the same bytes as a release build
+- a one-colour flat made the statistics code call __builtin_clz(0) (undefined; an
+  out-of-range write in a release build)
+- the texture-offset self-check compared a signed offset with its unsigned decoding;
+  the engine reads the two bytes as int16_t, so negative offsets are fine
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/whd_gen/config.h    | 3 +++
+ src/whd_gen/whd_gen.cpp | 4 ++--
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/whd_gen/config.h b/src/whd_gen/config.h
+index a124d71..8c2740c 100644
+--- a/src/whd_gen/config.h
++++ b/src/whd_gen/config.h
+@@ -17,11 +17,14 @@ void __attribute__((noreturn)) fail(const char *msg, ...);
+ #define TEXTURE_PIXEL_STATS 1
+ //#define PRETEND_COMPRESS 1
+ // todo sounds a bit better with 5, but slower
++// FM-1: -DLOOKAHEAD=5 gives a build with assertions the same output as a release build
++#ifndef LOOKAHEAD
+ #ifndef NDEBUG
+ #define LOOKAHEAD 3
+ #else
+ #define LOOKAHEAD 5
+ #endif
++#endif
+ 
+ #define CONSIDER_SEQUENCES 0
+ #define SEQUENCE 10
+diff --git a/src/whd_gen/whd_gen.cpp b/src/whd_gen/whd_gen.cpp
+index 7963840..34f7216 100644
+--- a/src/whd_gen/whd_gen.cpp
++++ b/src/whd_gen/whd_gen.cpp
+@@ -2504,7 +2504,7 @@ std::vector<int> convert_sidedefs(wad &wad, const texture_index &tex_index, lump
+                         texoff = sides_z[s0 + offset_offset[enc2]] << 1;
+                     }
+                 }
+-                assert(msd.textureoffset == texoff);
++                assert(msd.textureoffset == (int16_t)texoff); // FM-1: the engine reads these two bytes as int16_t, so a negative offset is fine
+                 int rowoff = 0;
+                 if (sides_z[s0] & 64) {
+                     uint pos = offset_offset[enc2] + ((sides_z[s0] >> 4)&3);
+@@ -4376,7 +4376,7 @@ void convert_flats(wad &wad) {
+             flat_colors.record(colors.size());
+             uint x = colors.size();
+             if (x) x--;
+-            x = 31 - __builtin_clz(x);
++            x = x ? 31 - __builtin_clz(x) : 0; // FM-1: a one-colour flat (Freedoom has them) made this clz(0), which is undefined
+             assert(x < 8);
+             flat_under_colors[x].record(colors.size());
+         } else {

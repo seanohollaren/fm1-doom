@@ -21,7 +21,10 @@ for f in tiny_huff.c musx_decoder.c image_decoder.c adpcm-xq/adpcm-lib.c; do
 done
 wait
 for o in $OBJS; do [ -f $o ] || { echo "FAIL $o"; exit 1; }; done
-em++ -O2 -fexceptions $OBJS -o $OUT/whd_gen.js \
-  -sMODULARIZE=1 -sEXPORT_NAME=WhdGen -sENVIRONMENT=web,worker,node -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 \
-  -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864 -sSTACK_SIZE=4194304 -sEXPORTED_RUNTIME_METHODS=FS,callMain
-echo "whdgen: $OUT ($(wc -c < $OUT/whd_gen.wasm | tr -d ' ') B wasm, $(wc -c < $OUT/whd_gen.js | tr -d ' ') B js)"
+L="-sMODULARIZE=1 -sEXPORT_NAME=WhdGen -sENVIRONMENT=web,worker,node -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 \
+  -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864 -sSTACK_SIZE=4194304 -sEXPORTED_RUNTIME_METHODS=FS,callMain"
+# two wrappers around the same objects: a classic script (the single-file page, node's require) and an ES module
+# (the site's worker: site/frontend). Each gets its own .wasm, since the wrapper and its .wasm are a matched pair.
+em++ -O2 -fexceptions $OBJS -o $OUT/whd_gen.js $L
+em++ -O2 -fexceptions $OBJS -o $OUT/whd_gen_es.js $L -sEXPORT_ES6=1     # .js, not .mjs: static hosts do not all serve .mjs as JavaScript
+echo "whdgen: $OUT ($(wc -c < $OUT/whd_gen.wasm | tr -d ' ') B wasm, $(wc -c < $OUT/whd_gen.js | tr -d ' ') B js; ES module: $(wc -c < $OUT/whd_gen_es.wasm | tr -d ' ') B wasm, $(wc -c < $OUT/whd_gen_es.js | tr -d ' ') B)"
