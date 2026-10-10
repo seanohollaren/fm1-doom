@@ -1,7 +1,7 @@
 // What each control does in the game: one table for the drawing of the FM-1 and for the list next to it.
 // It restates rp2040-doom/src/fm1/fm1_controls.c (FM1_MAP and the knob code below it); change both together.
 
-export type Group = 'move' | 'side' | 'fire' | 'use' | 'weapon' | 'menu' | 'view'
+export type Group = 'move' | 'side' | 'fire' | 'use' | 'weapon' | 'menu' | 'view' | 'filter'
 
 export const GROUPS: { id: Group; name: string }[] = [
   { id: 'move', name: 'Move' },
@@ -10,7 +10,8 @@ export const GROUPS: { id: Group; name: string }[] = [
   { id: 'use', name: 'Open doors, press switches' },
   { id: 'weapon', name: 'Change weapon' },
   { id: 'menu', name: 'Menu' },
-  { id: 'view', name: 'Picture' },
+  { id: 'view', name: 'Picture and sound' },
+  { id: 'filter', name: 'Filter' },
 ]
 
 /** note keys by position: 0 = the lowest key (F3) … 26 = the highest (G5) */
@@ -21,10 +22,10 @@ export const KEYS: Record<number, Group> = {
 
 /** buttons by their printed label */
 export const BUTTONS: Record<string, Group> = {
-  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', SCL: 'view', LFO: 'view', ENV: 'view',
+  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', SCL: 'view', LFO: 'view', ENV: 'view', EDIT: 'filter',
 }
 
-export const KNOBS: Record<string, Group> = { SELECT: 'weapon', 'KNOB 4': 'weapon' }
+export const KNOBS: Record<string, Group> = { SELECT: 'weapon', 'KNOB 4': 'weapon', MASTER: 'view', 'KNOB 1': 'filter', 'KNOB 2': 'filter' }
 
 export const LEGEND: { group: Group; rows: { keys: string[]; what: string }[] }[] = [
   {
@@ -57,9 +58,19 @@ export const LEGEND: { group: Group; rows: { keys: string[]; what: string }[] }[
   {
     group: 'view',
     rows: [
+      { keys: ['MASTER'], what: 'Volume; right down is silent' },
       { keys: ['SCL'], what: 'Picture shape: full screen, 4:3, wide' },
       { keys: ['LFO'], what: 'Screen speed: change it if the picture tears' },
       { keys: ['ENV'], what: 'Show the frame rate' },
+    ],
+  },
+  {
+    // the synth's own trick: a filter over everything the game plays
+    group: 'filter',
+    rows: [
+      { keys: ['KNOB 1'], what: 'Sweep. Left closes the sound down to a rumble; right thins it to a hiss; the centre is off' },
+      { keys: ['KNOB 2'], what: 'Resonance: how hard the filter rings where it cuts' },
+      { keys: ['EDIT'], what: 'Filter off' },
     ],
   },
 ]
