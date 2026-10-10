@@ -42,16 +42,16 @@ function expected(inst: Installer): { screen: Screen; says: string } {
   if (c.status === 'done' && c.result.kind === 'loader') return { screen: OFF, says: 'Dark: it is waiting in update mode.' }
   if (c.status === 'done' && c.result.kind === 'device' && c.result.doom)
     return { screen: DOOM_SCREENS[c.result.doom.mode] ?? GAME, says: c.result.doom.mode === 0 ? 'The game.' : 'A plain colour: it is waiting for an install.' }
-  return { screen: SYNTH, says: 'Its synth screen, for now.' }
+  return { screen: SYNTH, says: '' }
 }
 
 export function DevicePanel({ inst }: { inst: Installer }) {
   const { screen, says } = expected(inst)
   return (
     <aside className="devpanel" aria-label="What the FM-1 shows">
-      <Device screen={screen} label={`A drawing of the FM-1. Its screen shows: ${says}`} />
+      <Device screen={screen} label={`A drawing of the FM-1. Its screen shows: ${says || 'its synth screen.'}`} />
       <p className="devpanel__says">
-        <span className="label">On the FM-1’s screen</span>
+        <span className="label">You should see</span>
         {says}
       </p>
     </aside>

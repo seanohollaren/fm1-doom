@@ -68,8 +68,8 @@ export function ConnectStep({ inst, announce }: { inst: Installer; announce: boo
       }
     >
       <p className="lead">
-        The page asks the FM-1 what firmware it runs. Nothing is written in this step. Your browser will ask whether this site may use
-        MIDI devices: that is how it talks to the FM-1.
+        Connect to the FM-1 so we can check which firmware it’s currently running. Your browser will ask whether this site may use MIDI
+        devices.
       </p>
 
       <div className="action">

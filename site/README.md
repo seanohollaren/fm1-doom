@@ -21,6 +21,7 @@ away or go bad without harm: the visitor is told to use their own copy. Each mir
 | `frontend/src/lib/useInstaller.ts` | All the page's state: the file, the connection, the install run. |
 | `../web/*.js` | The install logic itself, shared with the single-file page (`web/installer.html`): `wadcut.js` (cut a WAD), `convert.js` (run the converter), `datapack.js` (pack), `install.js` (the install flow over MIDI), `vendor/felucca/` (Felucca's package and update-protocol code, unmodified). The site imports them as `@fm1/...`. |
 | `frontend/public/firmware`, `public/whdgen`, `src/firmware.json` | **Committed build outputs**: the firmware-only package, rp2040-doom's data converter as WebAssembly, and their hashes. Written by `sync_firmware.py`. |
+| `make_logo.py`, `art/` | The "FM-1" lettering (steel over gold brick, drawn from scratch by the script): the full logo (`art/fm1-logo.svg`) and the tab icon (`frontend/public/favicon.svg`). |
 | `security-headers.json` | The content security policy and permissions policy. CloudFront sends them; `npm run preview` sends the same. |
 | `infra/` | CDK: `DoomSiteCertStack` (us-east-1, for CloudFront) and `DoomSiteFrontendStack` (us-west-2: bucket, distribution, DNS). |
 | `../.github/workflows/deploy.yml` | Test, build, `cdk deploy` on a push to `main` that touches `site/` or `web/`. |
@@ -54,8 +55,8 @@ python3 site/sync_firmware.py b6                                    # copies the
 cd site/frontend && npm test                                        # the shareware WAD must still give the tested data
 ```
 
-Then edit `buildNotes` in `frontend/src/site.ts` (what a player should know about this build), check the controls
-list (`src/lib/controls.ts`; the test compares it with the firmware source), commit, and push.
+Then check the controls list (`src/lib/controls.ts`; the test compares it with the firmware source), commit, and
+push.
 
 ## Deploying
 

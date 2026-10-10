@@ -26,8 +26,7 @@ export function CheckStep({ inst, announce }: { inst: Installer; announce: boole
       }
     >
       <p className="lead">
-        This puts experimental firmware on an M-VAVE FM-1 that turns it into a one-level Doom machine. The synth firmware can be put back
-        afterwards.
+        This puts experimental Doom firmware on your M-VAVE FM-1. You’ll be able to flash it back to another firmware later.
       </p>
 
       {verdict === 'yes' && <Notice tone="ok" title="This browser can install it">It can talk to the FM-1 over USB.</Notice>}
@@ -51,15 +50,9 @@ export function CheckStep({ inst, announce }: { inst: Installer; announce: boole
       <ul className="needs">
         <li>
           <strong>An M-VAVE FM-1</strong>
-          <span>The installer has been tested on one, starting from the Felucca firmware.</span>
         </li>
         <li>
-          <strong>A USB cable that carries data</strong>
-          <span>Some cables only charge, and the browser never sees the FM-1 through those.</span>
-        </li>
-        <li>
-          <strong>The game file, DOOM1.WAD</strong>
-          <span>The free shareware release of Doom. The page can fetch it for you in the next step.</span>
+          <strong>A USB data cable</strong>
         </li>
       </ul>
     </StepShell>
