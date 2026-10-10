@@ -1204,3 +1204,22 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   `e4dcdbba8ca82687864b562c70bd6da8dae8b0db0066b1332b5b7602fce0858f` (equal to what is on the FM-1). Includes
   the screen / volume features of the previous build. Symbols: `firmware/installed_1aa81085/`. Site:
   `firmware/build/site_one`, preview `fm1-install-one`, port 8796 (stopped).
+
+## 2026-10-09 ~19:00 — Results from the device (build "b3") and what changed because of them
+
+- VERIFIED on the device (Sean): the fastest screen link step ("60 MHz") gives a clean picture and the game is
+  "super smooth"; the 240x180 shape is fine but he prefers the whole screen. No frame-rate figures given.
+  5 % volume: no comment yet.
+- So: the game picture now starts on the whole panel (`fm1_view = 2`) and goes out at the fastest link step
+  (`dev_lcd_game = 3`). SCL and LFO still step through the others. `fm1_lcd_blit` puts the game's rate back
+  whenever one of the device code's own screens (always drawn at Felucca's rate) came in between.
+- Installer page reworked at Sean's request (no log scrolling down the page): four stages with a mark each
+  (find the FM-1, install the firmware, send the game data, start Doom), one bar with a percentage, one
+  status line; the raw log holds only state changes (4–11 lines in the tests) and sits in a closed "Details".
+  Looked at in the browser pane in its idle, working, failed and done states; `web/test_installer.js` now also
+  checks the stage marks and the bar.
+- Build "b5" (NOT installed yet): firmware 266,808 B, recovery core id `97147e870713a75f`, build id `9a3465a8`;
+  `doom_part1.fwsc` SHA-256 `adf49dabbed0b7bbd56e237b98f40da83a02646abb24f84ebdeeaeba37e30837`; data block 2
+  unchanged (`e4dcdbba…`, equal to the FM-1's). 16 package runs + Felucca 1.5's update test + the page test
+  pass; the predicted flash passes `check_dump.py` and the replayed start-up check. Symbols:
+  `firmware/installed_adf49dab/`. Site: `firmware/build/site_one` (port 8796).

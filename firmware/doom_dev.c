@@ -194,7 +194,9 @@ static int ota_fread(uint32_t off, void *p, uint32_t n) { return flash_ok ? st_r
  * The game may step through faster settings (LFO button); every screen this file draws itself goes out at
  * Felucca's proven rate. */
 static const uint8_t DEV_LCD_BAUD[] = {LCD_BAUD, 2, 1, 0};
-static uint8_t dev_lcd_i;
+static uint8_t dev_lcd_i;                /* the rate set now */
+static uint8_t dev_lcd_game = 3;         /* the rate the game's picture goes out at: the fastest step ("60 MHz"), clean
+                                          * and smooth on Sean's unit 2026-10-09; LFO steps on from it */
 static void dev_lcd_rate(uint32_t i)
 {
     lcd_sync();                          /* no transfer in flight while the clock changes */
@@ -203,8 +205,9 @@ static void dev_lcd_rate(uint32_t i)
 }
 int fm1_lcd_speed_next(void)
 {
-    dev_lcd_rate((dev_lcd_i + 1u) % sizeof DEV_LCD_BAUD);
-    return (int)(60u / (DEV_LCD_BAUD[dev_lcd_i] + 1u));
+    dev_lcd_game = (uint8_t)((dev_lcd_game + 1u) % sizeof DEV_LCD_BAUD);
+    dev_lcd_rate(dev_lcd_game);
+    return (int)(60u / (DEV_LCD_BAUD[dev_lcd_game] + 1u));
 }
 static void dev_screen(uint16_t c)
 {
@@ -456,6 +459,8 @@ static void dev_data_request(uint32_t len, uint32_t crc, uint32_t flags)
 /* ------------------------------------------------------------------ the game's platform interface --- */
 void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px)
 {
+    if (dev_lcd_i != dev_lcd_game)
+        dev_lcd_rate(dev_lcd_game);      /* (one of this file's own screens was drawn since: back to the game's rate) */
     lcd_blit(x, y, w, h, px);            /* waits for the previous strip's DMA, starts this one and returns: the game
                                           * composes the next strip (in its other buffer) while this one goes out */
 }

@@ -61,7 +61,7 @@ class DoomDev {                       // mode: 0 game, 4 safe (second block miss
 }
 
 async function run(name, dev, search, expect) {
-  const els = {}, el = (id) => els[id] || (els[id] = { textContent: '', value: 0, disabled: false, scrollTop: 0, addEventListener(t, f) { this['on' + t] = f; } });
+  const els = {}, el = (id) => els[id] || (els[id] = { textContent: '', className: '', style: {}, value: 0, disabled: false, scrollTop: 0, addEventListener(t, f) { this['on' + t] = f; } });
   const input = { name: 'Felucca', state: 'connected', open: async () => {}, onmidimessage: null };
   const output = { name: 'Felucca', state: 'connected', open: async () => {}, send: (b) => dev.recv(Array.from(b)) };
   dev.attach((bytes) => { if (input.onmidimessage) input.onmidimessage({ data: Uint8Array.from(bytes) }); });
@@ -74,8 +74,9 @@ async function run(name, dev, search, expect) {
   await new Promise((r) => setTimeout(r, 300));
   const ready = el('say').textContent;
   await el('go').onclick();
-  const said = el('say').textContent, ok = expect(said, dev, ready);
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}\n          page: "${said}"`);
+  const said = el('say').textContent, st = [1, 2, 3, 4].map((n) => el('st' + n).className.replace('stage', '').trim() || '-').join(' ');
+  const ok = expect(said, dev, ready, st, el('bar').style.width);
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}\n          page: "${said}"  stages: ${st}  bar: ${el('bar').style.width}  log lines: ${el('log').textContent.split(String.fromCharCode(10)).length - 1}`);
   if (!ok) console.log(el('log').textContent.split('\n').slice(-12).join('\n'));
   return ok;
 }
@@ -83,15 +84,15 @@ async function run(name, dev, search, expect) {
 (async () => {
   let all = true;
   all &= await run('safe mode, second block missing: the page sends it and the game starts', new DoomDev({ mode: 4 }), '',
-    (said, d) => /^Done/.test(said) && d.finished && d.got.equals(data2) && d.mode === 0 && d.flags.join() === '2,2,0,2');
+    (said, d, r, st, w) => /^Done/.test(said) && d.finished && d.got.equals(data2) && d.mode === 0 && d.flags.join() === '2,2,0,2' && st === 'done done done done' && w === '100%');
   all &= await run('the game already running this build: nothing to do, nothing sent', new DoomDev({ mode: 0 }), '',
-    (said, d) => /^Done/.test(said) && d.got === null && d.flags.every((f) => f === 2));
+    (said, d, r, st, w) => /^Done/.test(said) && d.got === null && d.flags.every((f) => f === 2) && st === 'done done done done' && w === '100%');
   all &= await run('test mode from the safe screen: the rewrite flag reaches the firmware', new DoomDev({ mode: 2 }), '?force=1',
-    (said, d, ready) => /test mode/.test(ready) && /^Done/.test(said) && d.finished && d.got.equals(data2) && d.flags.includes(1));
+    (said, d, ready) => /test mode/i.test(ready) && /^Done/.test(said) && d.finished && d.got.equals(data2) && d.flags.includes(1));
   all &= await run('test mode while the game runs: asks for the safe screen, sends nothing', new DoomDev({ mode: 0 }), '?force=1',
-    (said, d) => /hold HOME/.test(said) && d.got === null);
+    (said, d, r, st) => /hold HOME/.test(said) && d.got === null && st === 'done done fail -');
   all &= await run('the firmware stops asking part way: reported', new DoomDev({ mode: 4, stopAt: 512 * 40 }), '',
-    (said, d) => /stopped asking/.test(said) && !d.finished);
+    (said, d, r, st) => /stopped asking/.test(said) && !d.finished && st === 'done done fail -');
   console.log(all ? 'INSTALLER PAGE TEST PASSED' : 'INSTALLER PAGE TEST FAILED');
   process.exit(all ? 0 : 1);
 })();
