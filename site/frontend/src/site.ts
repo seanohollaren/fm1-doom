@@ -12,12 +12,6 @@ export const site = {
     'https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/f412706f9fe89b9ed8b888b5ea4e56db9db78ebd/doom1.wad',
   ],
   feluccaInstallerUrl: 'https://hugelton.github.io/Felucca/',
-  /** what a player should know about the build the page installs; edit with every firmware release */
-  buildNotes: [
-    'One level: E1M1. Finishing it returns to the title picture.',
-    'No saved games, no map screen, no end-of-level tally: there was no room.',
-    'Sound effects are stored at half their original sample rate to fit.',
-  ],
 }
 
 export const STEPS = [

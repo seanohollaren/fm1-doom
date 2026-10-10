@@ -55,8 +55,8 @@ python3 site/sync_firmware.py b6                                    # copies the
 cd site/frontend && npm test                                        # the shareware WAD must still give the tested data
 ```
 
-Then edit `buildNotes` in `frontend/src/site.ts` (what a player should know about this build), check the controls
-list (`src/lib/controls.ts`; the test compares it with the firmware source), commit, and push.
+Then check the controls list (`src/lib/controls.ts`; the test compares it with the firmware source), commit, and
+push.
 
 ## Deploying
 

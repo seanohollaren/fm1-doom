@@ -72,15 +72,6 @@ export function Manual() {
                 <strong>Felucca’s saved projects and samples do not.</strong> The game data lies over them.
               </li>
             </ul>
-
-            <h3 className="display manual__h manual__h--next" id="limits">
-              In this build
-            </h3>
-            <ul className="facts">
-              {site.buildNotes.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ul>
           </article>
         </div>
       </div>
