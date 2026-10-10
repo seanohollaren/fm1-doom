@@ -1540,3 +1540,20 @@ Sean's changes after playing b7 (b7 is what `main` and the live site serve, pull
 - NOT VERIFIED until it runs on the FM-1: that the layout feels right in the hand, and nothing else — the
   screen link rate is the one b5 to b7 already used.
 - ASSUMED: Sean has run b7 on the device (he merged it and came back with layout changes); he has not said so.
+
+## 2026-10-10 — Site: the controls drawing full width with labelled keys; a real screenshot on its screen
+
+- The drawn FM-1 spans the controls section; the list is under it in two columns. Each note key the game uses
+  carries its action (one word, or two with a line each); a button or knob the game uses explains itself under
+  the pointer. `KEY_LABELS` and `TIPS` in `site/frontend/src/lib/controls.ts`; a test holds them to the keys,
+  buttons and knobs the table lists.
+- The screen of the drawn FM-1 showed a drawing made for the page. Sean asked for a real picture:
+  `site/capture_screen.js` (new) runs the firmware's browser build headless, starts a game through the panel
+  and writes the panel's 240x240 picture two seconds after the level appears to
+  `site/frontend/src/assets/e1m1-start.png` (25,735 B, 492 colours: the 320-to-240 scaler blends). VERIFIED: two
+  runs give the same file (SHA-256 `fcaa2e16…bbe93903`).
+- **This is the first piece of id Software's artwork in the repository and on the site** (Sean's request). It
+  is a screenshot of the shareware level, not game data: the rule against committing or hosting a WAD or
+  anything cut from one stands, and CI's check for game data in the build is unchanged.
+- The drawn screen is now the panel pixel for pixel (240x240, was a 60x60 grid scaled up): the plain-colour
+  screens are painted in 4x4 cells, so they look as before, and the melt moves in the same cells.
