@@ -58,6 +58,9 @@
 .controls__group.g-view {
   --g: var(--g-view);
 }
+.controls__group.g-filter {
+  --g: var(--g-filter);
+}
 
 .controls__name {
   display: flex;

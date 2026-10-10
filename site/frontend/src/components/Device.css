@@ -123,9 +123,16 @@
   stroke: var(--g-menu);
 }
 
-.device--controls .dv-btn.is-view rect {
+.device--controls .dv-btn.is-view rect,
+.device--controls .dv-knob.is-view .dv-knob__cap {
   fill: var(--g-view);
   stroke: var(--g-view);
+}
+
+.device--controls .dv-btn.is-filter rect,
+.device--controls .dv-knob.is-filter .dv-knob__cap {
+  fill: var(--g-filter);
+  stroke: var(--g-filter);
 }
 
 .device--controls .dv-btn.has-group text {

@@ -67,11 +67,14 @@ describe.skipIf(!existsSync(source))('the controls table against the firmware so
     }
     expect(Object.keys(keys).length).toBeGreaterThan(10)
     expect(KEYS).toEqual(keys)
-    // SCL, LFO and ENV are handled outside the map, in code
-    for (const b of ['SCL', 'LFO', 'ENV']) {
+    // SCL, LFO, ENV and EDIT are handled outside the map, in code
+    for (const [b, does] of [['SCL', 'view'], ['LFO', 'view'], ['ENV', 'view'], ['EDIT', 'filter']]) {
       expect(c).toContain(`FM1_BTN_${b})`)
-      buttons[b] = 'view'
+      buttons[b] = does
     }
+    // the filter's two knobs
+    expect(c).toContain('enc[FM1_ENC_K1]')
+    expect(c).toContain('enc[FM1_ENC_K2]')
     expect(BUTTONS).toEqual(buttons)
   })
 })

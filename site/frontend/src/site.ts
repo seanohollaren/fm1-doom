@@ -21,7 +21,6 @@ export const site = {
   buildNotes: [
     'One level: E1M1. Finishing it returns to the title picture.',
     'No saved games, no map screen, no end-of-level tally: there was no room.',
-    'Sound plays at one fixed, low volume. The volume knob is not connected yet.',
     'Sound effects are stored at half their original sample rate to fit.',
   ],
 }
