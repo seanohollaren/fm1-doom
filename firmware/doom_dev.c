@@ -42,8 +42,13 @@
 #define FELUCCA_UAC 0
 #define FELUCCA_USB_LAYOUT 0
 #ifndef FELUCCA_ID
-#define FELUCCA_ID "FM-1_900"            /* package identity: the same as a Felucca development build */
+#define FELUCCA_ID "FM-1_666"            /* what the update handshake reports: an identity of our own, so an installer
+                                          * page can tell this firmware from Felucca (FM-1_9xx) and stock (FM-1_015)
+                                          * before it sends anything only this firmware understands */
 #endif
+/* Where Felucca's RAM flash driver may erase and program in this firmware: the game data's second block and the
+ * update staging area, and nothing else (Felucca's own default also allows its settings and autosave sectors). */
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x00093000u, 0x000E5000u))
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #define BOOTGUARD_MAGIC 0x42475244u
 
@@ -265,6 +270,8 @@ static void dev_enter_uboot(void)
     fm1_enter_uboot();
 }
 
+static void dev_data_request(uint32_t len, uint32_t crc, uint32_t flags);
+
 /* watchdog, boot guard, the UBOOT key chord, the update protocol. Game mode: once per game tic; safe mode: its loop */
 static void dev_service(void)
 {
@@ -289,6 +296,9 @@ static void dev_service(void)
         if (d == 7u && ota_dec[2] == 0x11) {
             ota_reply_identity();
             dev_host_seen = 1;
+        } else if (d == 19u && ota_dec[2] == 0x44) {         /* "here is your second data block": length, CRC, flags */
+            dev_host_seen = 1;
+            dev_data_request(ota_rd32(ota_dec + 6), ota_rd32(ota_dec + 10), ota_rd32(ota_dec + 14));
         }
     }
     if (usb.ota_req) {                   /* the host starts an update */
@@ -328,12 +338,18 @@ static uint32_t dev_crc(const uint8_t *p, uint32_t n)       /* CRC16 in 4 KiB st
     return c;
 }
 
+static int dev_desc_ok(void)
+{
+    const dev_desc_t *d = DEV_DESC;
+    return d->magic[0] == 'F' && d->magic[1] == 'M' && d->magic[2] == '1' && d->magic[3] == 'D' && d->ver == 1u &&
+           ota_crc16((const uint8_t *)d, 60, 0) == d->dcrc && d->split <= d->total && d->total <= 0x100000u;
+}
+
 static uint8_t dev_data_check(void)      /* MODE_GAME if everything the game will read is there and intact */
 {
     const dev_desc_t *d = DEV_DESC;
     const uint8_t *b1 = _desc_load + sizeof(dev_desc_t);
-    if (d->magic[0] != 'F' || d->magic[1] != 'M' || d->magic[2] != '1' || d->magic[3] != 'D' || d->ver != 1u ||
-        ota_crc16((const uint8_t *)d, 60, 0) != d->dcrc || d->split > d->total || d->total > 0x100000u)
+    if (!dev_desc_ok())
         return SAFE_NODATA;
     if (b1[0] != 'I' || b1[1] != 'W' || b1[2] != 'H' || b1[3] != 'X' || dev_crc(b1, d->split) != d->crc1)
         return SAFE_NODATA;
@@ -354,6 +370,87 @@ static void dev_mode_screen(void)
     case SAFE_PART2: dev_screen(0x0010); lcd_fill(0, 0, 24, 24, 0xFFFF); lcd_fill(216, 0, 24, 24, 0xFFFF); break;
     default: dev_screen(0x0010); lcd_fill(0, 0, 24, 24, 0xFFFF); break;              /* blue: no game data */
     }
+}
+
+/* ------------------------------------------------------------------ the second data block over USB (safe mode) --- */
+/* An installer page that has just put this firmware on (with block 1 behind it) sends cmd 0x44 with the length and
+ * CRC of the block 2 it holds. We answer cmd 0x44: code 0 = send it (we then ask for it piece by piece with the
+ * update protocol's own read requests, addresses = offsets in the block, and finish with the protocol's "success"
+ * exchange at 0xF0000000), 1 = nothing to do (the game is running), 2 = that is not this firmware's data,
+ * 3 = the flash is not the expected part; then mode, flash flag and the descriptor's total / split / CRC / build.
+ * Flags: bit 0 = rewrite sectors even if they already match (a test of the write path), bit 1 = only say what
+ * the answer would be, start nothing. Only in safe mode; the writing itself is firmware/dev_data.h. A good write
+ * restarts into the game, where the start-up check has the last word. */
+static int dd_pull(uint32_t off, uint8_t *dst, uint32_t n) { return ota_read(off, dst, n); }
+static int dd_finish(void)
+{
+    uint8_t b[8];
+    uint32_t i;
+    for (i = 0; i < 4u; i++)
+        if (!ota_read(0xF0000000u, b, 8) && ota_memeq(b, (const uint8_t *)"success", 8))
+            return 0;
+    return -1;
+}
+static int dd_fread(uint32_t off, uint8_t *dst, uint32_t n) { return st_read(off, dst, n); }
+static int dd_erase(uint32_t off) { uint32_t took; return fl_erase4k(off, &took); }
+static int dd_prog(uint32_t off, const uint8_t *src, uint32_t n) { return fl_write(off, src, n); }
+static void dd_progress(uint32_t done, uint32_t total) { lcd_fill(20, 110, 1u + done / (total / 199u + 1u), 20, 0xFFFF); }
+static void dd_feed(void) { dev_feed(); }
+#include "dev_data.h"
+
+static void dev_data_reply(uint32_t code)
+{
+    uint8_t r[20];
+    const dev_desc_t *d = DEV_DESC;
+    int ok = dev_desc_ok();
+    r[0] = (uint8_t)code;
+    r[1] = dev_mode;
+    r[2] = flash_ok;
+    r[3] = 0;
+    ota_wr32(r + 4, ok ? d->total : 0u);
+    ota_wr32(r + 8, ok ? d->split : 0u);
+    ota_wr32(r + 12, ok ? d->crc2 : 0u);
+    ota_wr32(r + 16, ok ? d->rsv[0] : 0u);              /* which firmware image this is (firmware/pack.py) */
+    ota_send_msg(0x44, r, sizeof r);
+}
+
+static void dev_data_request(uint32_t len, uint32_t crc, uint32_t flags)
+{
+    const dev_desc_t *d = DEV_DESC;
+    uint32_t written;
+    int rc;
+    if (dev_mode == MODE_GAME) {
+        dev_data_reply(1);
+        return;
+    }
+    if (!flash_ok) {
+        dev_data_reply(3);
+        return;
+    }
+    if (!dev_desc_ok() || d->off2 != DD_LO || d->split >= d->total || len != d->total - d->split || crc != d->crc2) {
+        dev_data_reply(2);
+        return;
+    }
+    dev_data_reply(0);
+    if (flags & 2u)
+        return;                          /* a question only */
+    dev_screen(0x0010);
+    ota_deadline = ota_now_ms() + 600000u;
+    /* the game's heap is free in safe mode: two sector buffers from its start */
+    rc = dd_write(DD_LO, len, (int)(flags & 1u), _heap_start, _heap_start + DD_SECTOR, &written);
+    ota_deadline = 0;
+    if (rc == DD_OK) {
+        dev_screen(0x07E0);
+        fm1_delay_ms(600);
+        bootguard.pending = 0;
+        bootguard.failed = 0;
+        usb_detach();
+        fm1_delay_ms(30);
+        fm1_reboot();
+    }
+    dev_screen(0xF800);
+    fm1_delay_ms(1500);
+    dev_mode_screen();
 }
 
 /* ------------------------------------------------------------------ the game's platform interface --- */

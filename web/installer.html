@@ -1,0 +1,172 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- FM-1 Doom: the one-button installer. The update protocol code (fm1pkg.js, fm1ota.js) is Felucca's,
+     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, GPL-3.0-only, inlined by
+     web/make_installer.py. This page adds a second phase: once the firmware is on, it hands the firmware the
+     second block of the game data, which the firmware writes to flash itself (firmware/doom_dev.c, cmd 0x44). -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doom for the FM-1: installer</title>
+<style>
+  :root { --bg: #16161a; --fg: #e8e6e3; --dim: #9a9892; --accent: #c8402c; --ok: #4caf6a; --line: #33333a; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f5f2; --fg: #1c1c1e; --dim: #66645f; --line: #d8d6d0; } }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; margin: 0; }
+  main { max-width: 34rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p { margin: .6rem 0; } .dim { color: var(--dim); font-size: .9rem; }
+  button { font: inherit; font-weight: 600; padding: .7rem 1.6rem; border: 0; border-radius: .4rem; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  progress { width: 100%; height: .9rem; margin-top: 1rem; }
+  #say { min-height: 3rem; margin-top: .6rem; font-weight: 600; }
+  ul { padding-left: 1.2rem; } li { margin: .3rem 0; }
+  pre { font-size: .75rem; color: var(--dim); white-space: pre-wrap; max-height: 12rem; overflow: auto; border-top: 1px solid var(--line); padding-top: .5rem; margin-top: 2rem; }
+</style></head><body><main>
+<h1>Doom for the FM-1</h1>
+<p class="dim" id="what"></p>
+<ul>
+  <li>Connect the FM-1 straight to this computer by USB (no hub) and switch it on.</li>
+  <li>Use Chrome or Edge. Close other apps and tabs that use MIDI.</li>
+  <li>Do not unplug the cable or close this page while it works.</li>
+</ul>
+<button id="go" disabled>Install</button>
+<progress id="bar" max="100" value="0"></progress>
+<div id="say">Loading&hellip;</div>
+<p class="dim">Experimental firmware, tested on one FM-1. It replaces the synth firmware and overwrites the area where Felucca keeps saved
+projects and samples; presets saved by the original firmware are not touched. Use at your own risk.</p>
+<pre id="log"></pre>
+<script>
+/*LIB*/
+const meta = /*META*/;
+const $ = (id) => document.getElementById(id);
+const say = (s) => { $("say").textContent = s; };
+const log = (s) => { $("log").textContent += s + "\n"; $("log").scrollTop = 1e9; };
+const QUERY = 2, FORCE = 1;
+const force = new URLSearchParams(location.search).get("force") === "1";
+const le32 = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+const rd32 = (u, i) => (u[i] | (u[i + 1] << 8) | (u[i + 2] << 16) | (u[i + 3] << 24)) >>> 0;
+const MODES = ["game", "safe (last start failed)", "safe (HOME held)", "safe (no data)", "safe (second block missing)"];
+
+// one message of the update protocol: 00 59 cmd len24 body ~sum(body), 7-bit packed between F0 and F7
+function frame(cmd, body) {
+  const d = [0x00, 0x59, cmd, body.length & 255, (body.length >> 8) & 255, (body.length >> 16) & 255, ...body];
+  let s = 0;
+  for (const b of body) s += b;
+  d.push(~s & 255);
+  return [0xF0, ...pack7(d), 0xF7];
+}
+function parseDataReply(pkt) {
+  if (pkt[0] !== 0xF0 || pkt[pkt.length - 1] !== 0xF7) return null;
+  const u = unpack7(pkt.slice(1, -1));
+  if (u.length < 27 || u[0] !== 0 || u[1] !== 0x59 || u[2] !== 0x44 || (u[3] | (u[4] << 8) | (u[5] << 16)) !== 20) return null;
+  let s = 0;
+  for (let i = 6; i < 26; i++) s += u[i];
+  if ((~s & 255) !== u[26]) return null;
+  return { code: u[6], mode: u[7], flash: u[8], total: rd32(u, 10), split: rd32(u, 14), crc2: rd32(u, 18), build: rd32(u, 22) };
+}
+// ask the Doom firmware about its second data block (flags: QUERY = only answer, FORCE = rewrite even if it matches)
+async function ask(link, flags) {
+  link.drain();
+  for (let t = 0; t < 3; t++) {
+    if (!link.send(frame(0x44, [...le32(data2.length), ...le32(meta.data2_crc16), ...le32(flags)]))) return null;
+    const end = Date.now() + 1500;
+    while (Date.now() < end) {
+      const p = await link.read(end - Date.now());
+      if (!p) break;
+      const r = parseDataReply(p);
+      if (r) { log(`data reply: code ${r.code}, mode ${MODES[r.mode] || r.mode}, build ${r.build.toString(16)}`); return r; }
+    }
+  }
+  return null;
+}
+const mine = (r) => r && r.build === meta.build && r.total === meta.total && r.split === meta.split && r.crc2 === meta.data2_crc16;
+function stop(msg) { const e = new Error(msg); e.shown = true; return e; }
+
+let image = null, data2 = null, writing = false;
+window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "Writing. Do not close the page."; } });
+
+(async () => {
+  $("what").textContent = `Build ${meta.version}: the first level of the shareware game, for the M-VAVE FM-1.`;
+  if (!navigator.requestMIDIAccess) { say("This browser cannot do it. Open the page in Chrome or Edge on a computer."); return; }
+  try {
+    if (JSON.stringify(frame(0x11, [])) !== JSON.stringify([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])) throw new Error("self-check failed");
+    let r = await fetch(meta.pkg);
+    if (!r.ok) throw new Error(`${meta.pkg}: HTTP ${r.status}`);
+    const pkg = new Uint8Array(await r.arrayBuffer());
+    if (productOf(pkg) !== meta.product) throw new Error("the firmware file is not the expected one");
+    image = logicalImage(pkg);
+    r = await fetch(meta.data2);
+    if (!r.ok) throw new Error(`${meta.data2}: HTTP ${r.status}`);
+    data2 = new Uint8Array(await r.arrayBuffer());
+    if (data2.length !== meta.data2_len || crc16(data2) !== meta.data2_crc16) throw new Error("the game data file is damaged");
+    say(force ? "Ready (test mode: the game data will be rewritten even if it is already there)." : "Ready.");
+    $("go").disabled = false;
+  } catch (e) { say("Could not load: " + e.message + " Reload the page."); }
+})();
+
+$("go").addEventListener("click", async () => {
+  if (writing) return;
+  writing = true; $("go").disabled = true; $("bar").value = 0;
+  let midi;
+  try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+  catch (e) { say("MIDI (SysEx) access was not allowed. Allow MIDI for this site in the address bar and press Install again."); writing = false; $("go").disabled = false; return; }
+  try {
+    const up = new Updater(midi, log);
+    const N1 = 74 + 1167, N2 = Math.ceil(data2.length / 512), bar = (f) => { $("bar").value = f * 100; };
+    const step = (k, a) => {
+      log(`${k} ${a ?? ""}`);
+      if (k === "start") say("Starting");
+      if (k === "verify") { say("Step 1 of 2: checking the firmware file with the FM-1"); bar(0.6 * a / N1); }
+      if (k === "loader") say("Step 1 of 2: switching to update mode (the screen goes dark)");
+      if (k === "write") { say("Step 1 of 2: writing the firmware"); bar(0.6 * (74 + a) / N1); }
+      if (k === "reboot") say("Restarting");
+    };
+    // an update loader left waiting by an interrupted install: finish that first
+    const ota = await up.find((id) => /^ota-/i.test(id.model));
+    if (ota) {
+      ota.link.close();
+      if (!(await up.resume(image, step, meta.product))) throw stop("Stopped. Replug the USB cable and press Install again.");
+    } else {
+      const dev = await up.find((id) => !/^ota-/i.test(id.model));
+      if (!dev) throw stop("FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, and press Install again.");
+      log(`found ${dev.id.text} on "${dev.name}"`);
+      let have = false;
+      if (dev.id.text === meta.product) have = mine(await ask(dev.link, QUERY));   // only our own firmware is asked
+      dev.link.close();
+      if (have) log("this firmware build is already installed: step 1 skipped");
+      else await up.install(image, meta.product, step);
+    }
+    bar(0.6);
+    // step 2: the second block of the game data, written by the firmware itself
+    for (let round = 0; ; round++) {
+      say(round ? "Restarting" : "Step 2 of 2: looking for the new firmware");
+      await sleep(round ? 3000 : 500);
+      const dev = await up.waitFor((id) => id.text === meta.product, 40000);
+      if (!dev) throw stop("The FM-1 did not come back. Switch it off and on, then press Install again.");
+      const q = await ask(dev.link, QUERY);
+      if (!q) { dev.link.close(); throw stop("The firmware did not answer the question about its game data. Press Install again."); }
+      if (!mine(q)) { dev.link.close(); throw stop("The FM-1 reports a different build than this page installs. Press Install again."); }
+      if (q.code === 1 && !(force && round === 0)) { dev.link.close(); bar(1); say("Done. Doom is running on the FM-1."); break; }
+      if (q.code === 1) { dev.link.close(); throw stop("Test mode needs the safe screen: switch the FM-1 off, hold HOME, switch it on, then press Install again."); }
+      if (q.code !== 0) { dev.link.close(); throw stop(q.code === 3 ? "The FM-1's flash chip is not the expected one. Nothing was written." : "The firmware refused the game data (code " + q.code + ")."); }
+      if (round >= 2) { dev.link.close(); throw stop("The game data was sent twice and the game still does not start. Press Install again, or report this."); }
+      const go = await ask(dev.link, force && round === 0 ? FORCE : 0);
+      if (!go || go.code !== 0) { dev.link.close(); throw stop("The firmware did not start taking the game data. Press Install again."); }
+      say("Step 2 of 2: sending the game data");
+      const s = await up.serve(dev.link, data2, 0xF0000000, 30000, (n) => { bar(0.6 + 0.4 * Math.min(1, n / N2)); });
+      dev.link.close();
+      log(`data: ${s.served} requests served, finished ${s.finished}`);
+      if (!s.finished) throw stop(s.lost ? "The USB connection was lost while sending the game data. Replug it and press Install again." :
+                                          "The FM-1 stopped asking for the game data. Press Install again; it carries on where it was.");
+    }
+  } catch (e) {
+    const T = { notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, and press Install again.",
+                model: "The connected device is not an FM-1.", stopped: "Stopped. Replug the USB cable and press Install again.",
+                lost: "The USB connection was lost. Replug it and press Install again.",
+                noloader: "The FM-1 in update mode was not found. Replug the USB cable and press Install again (it stays in update mode until it is finished).",
+                noreturn: "The FM-1 did not come back. Switch it off and on, then press Install again.",
+                mismatch: "Written, but the FM-1 reports another version: " + (e && e.detail || "") };
+    say(e && e.shown ? e.message : e && e.code && T[e.code] ? T[e.code] : "Error: " + (e && e.message));
+    log(String(e && e.stack || e));
+  }
+  writing = false; $("go").disabled = false;
+});
+</script></main></body></html>

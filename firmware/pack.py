@@ -41,6 +41,7 @@ APP_XIP = 0x02000120
 APP_AREA_END = 0x93000      # Felucca's loader writes [0x4000, 0x93000); flash from here up reads unencrypted
 DATA_END = 0xE0000          # the update staging area (and Felucca's update record) start here
 DESC_LEN = 64
+PRODUCT = "FM-1_666"        # the identity doom_dev.c reports (FELUCCA_ID) and the package marker installers compare with
 
 
 def sym(name):
@@ -94,8 +95,10 @@ def split_point(whx, room):
     return fit[0]
 
 
-def descriptor(whx, split):
-    d = struct.pack("<4sIIIIII", b"FM1D", 1, len(whx), split, pk.crc16(whx[:split]), APP_AREA_END, pk.crc16(whx[split:]))
+def descriptor(whx, split, build):
+    """build: 32 bits that name this firmware image; the firmware reports them so an installer page can tell
+    whether the firmware on the device is the one it carries (doom_dev.c dev_desc_t.rsv[0])"""
+    d = struct.pack("<4sIIIIIII", b"FM1D", 1, len(whx), split, pk.crc16(whx[:split]), APP_AREA_END, pk.crc16(whx[split:]), build)
     d += bytes(60 - len(d))
     return d + struct.pack("<I", pk.crc16(d))
 
@@ -170,9 +173,9 @@ def main():
     # 1. the firmware alone
     flash = pk.flash_image(img, pk.KEY)
     (OUT / "doom.bin").write_bytes(img)
-    (OUT / "doom_code.fwsc").write_bytes(pk.ufw(flash, felucca_ota, "FM-1_900"))
+    (OUT / "doom_code.fwsc").write_bytes(pk.ufw(flash, felucca_ota, PRODUCT))
     print(f"firmware {len(img)} B, recovery core id {core}")
-    print(f"doom_code.fwsc   {len(pk.ufw(flash, felucca_ota, 'FM-1_900'))} B   Felucca layout, Felucca loader ({len(felucca_ota)} B), no data")
+    print(f"doom_code.fwsc   {len(pk.ufw(flash, felucca_ota, PRODUCT))} B   Felucca layout, Felucca loader ({len(felucca_ota)} B), no data")
     if len(sys.argv) < 2:
         return
 
@@ -180,7 +183,9 @@ def main():
     whx = Path(sys.argv[1]).read_bytes()
     room = pk.APP_SLOT - (desc_at + DESC_LEN)
     split = split_point(whx, room)
-    desc = descriptor(whx, split)
+    import hashlib
+    build = int.from_bytes(hashlib.sha256(img).digest()[:4], "little")
+    desc = descriptor(whx, split, build)
     app = img + b"\xff" * (desc_at - len(img)) + desc + whx[:split]
     assert len(app) <= pk.APP_SLOT
     block2 = whx[split:]
@@ -215,9 +220,15 @@ def main():
     print("  ok    both blocks read back to the original file; checksums as the firmware computes them")
     print("  ok    no 4 KB boundary in the data region looks like an update record")
     ext_ota = doom_loader()
-    p1, p2 = pk.ufw(flash1, felucca_ota, "FM-1_900"), pk.ufw(flash2, ext_ota, "FM-1_900")
+    p1, p2 = pk.ufw(flash1, felucca_ota, PRODUCT), pk.ufw(flash2, ext_ota, PRODUCT)
     (OUT / "doom_part1.fwsc").write_bytes(p1)
     (OUT / "doom_full.fwsc").write_bytes(p2)
+    # for the one-button installer page (web/make_installer.py): block 2 as a file, and what the firmware expects of it
+    import json
+    (OUT / "doom_data2.bin").write_bytes(block2)
+    (OUT / "doom_install.json").write_text(json.dumps({
+        "product": PRODUCT, "core": core, "build": build, "split": split, "total": len(whx),
+        "data2_len": len(block2), "data2_crc16": pk.crc16(block2)}, indent=1) + "\n")
     print(f"doom_part1.fwsc  {len(p1)} B   Felucca layout, Felucca loader, data block 1; writes nothing above {APP_AREA_END:#x}")
     print(f"doom_full.fwsc   {len(p2)} B   the same app area + data block 2; loader variant ({len(ext_ota)} B)")
     print("NOT TESTED ON HARDWARE - do not install without review")

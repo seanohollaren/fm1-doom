@@ -28,5 +28,7 @@ run "loader variant, long package: doom_part1 installed -> doom_full (app area m
 run "loader variant, long package: Felucca installed -> doom_full" $T/doom_ldr_test $F $B/doom_full.fwsc
 run "loader variant, long package: doom_full again" $T/doom_ldr_test $B/doom_full.fwsc $B/doom_full.fwsc same-app
 run "full Doom installed -> Felucca, Felucca's loader [Felucca's test]" $T/ldr_test $B/doom_full.fwsc $F
+$CC -Wextra -o $T/data_test firmware/tests/data_test.c            # the second data block written by our own firmware
+run "data block 2 over USB: firmware/dev_data.h against a simulated flash and host" $T/data_test
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

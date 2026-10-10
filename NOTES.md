@@ -1162,3 +1162,45 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   Split still 294,980 and the data region equals what is on the FM-1, so this is a USB install only (138 of
   143 app sectors change); the predicted image passes `check_dump.py` and the replayed start-up check.
   Symbols: `firmware/installed_65dd0d09/`. Page: `firmware/build/site_b3`, preview `fm1-install-b3`, port 8795.
+
+## 2026-10-09 ~18:30 — One-button browser install: built and tested on the Mac, NOT yet run on the device
+
+- Why not boot mode from a page: browsers offer Web MIDI only; Chrome's WebUSB refuses mass-storage
+  interfaces (ASSUMED from Chrome's protected-class list; not tried).
+- Design: phase 1 is the standard update (Felucca's unmodified loader writes firmware + data block 1). Phase 2
+  is new: the page sends cmd `0x44` (length, CRC-16 and flags of the block 2 it holds) in the update
+  protocol's own frame format; our firmware answers `0x44` with a code (0 = send it, 1 = nothing to do, the
+  game runs, 2 = not this firmware's data, 3 = wrong flash part) plus mode and the descriptor's total / split
+  / CRC / build; on 0 it fetches the block with the protocol's ordinary read requests (offsets in the block,
+  512 B each, then the "success" exchange at `0xF0000000`), which the page serves with Felucca's own
+  `Updater.serve()`. Flags: bit 0 rewrite even if equal (test), bit 1 answer only.
+- Firmware: `firmware/dev_data.h` (sector by sector: fetch, compare with flash, erase + program + read back
+  only if different, three tries; only `[0x93000, 0xE0000)`), hooked into safe mode in `doom_dev.c`
+  (`dev_data_request`). Work buffers: the first 8 KB of the game's heap, free in safe mode. A good write
+  restarts; the start-up check then decides. Never in game mode.
+- The RAM flash driver's own window is now `FL_RANGE_OK = [0x93000, 0xE5000)` (data block 2 + update
+  staging). VERIFIED in the disassembly of `fl_erase4k_ram` and `fl_prog_ram`: `off - 0x93000 > 0x52000` → refuse.
+  The driver cannot touch the app area, Felucca's settings or autosave sectors, whatever calls it. Its code
+  is therefore no longer byte-identical to Felucca's (2,784 B vs 2,924 B).
+- Identity: our firmware now reports `FM-1_666` (was Felucca's development identity `FM-1_900`), so a page
+  can recognise it before sending `0x44`; nothing else is ever sent the new command. The descriptor carries
+  a 32-bit build id (first 4 bytes of the image's SHA-256, `rsv[0]`), reported in the `0x44` answer, so the
+  page skips phase 1 when the same build is already installed.
+- Page: `web/installer.html` + `web/make_installer.py VERSION OUT_DIR` (inlines Felucca's `fm1pkg.js` and
+  `fm1ota.js`, GPL-3.0-only; copies `doom_part1.fwsc` and `doom_data2.bin`). `?force=1` = rewrite the data even
+  if it matches (needs the safe screen). `pack.py` now also writes `doom_data2.bin` and `doom_install.json`.
+- VERIFIED on the Mac: `firmware/tests/data_test.c` (19 checks on a simulated NOR flash and host: write,
+  no-op when equal, force, one wrong sector, bad program retried, program that never works, sector that will
+  not erase, host stopping, host not confirming, short block, exactly full region, five refusals with nothing
+  touched), now part of `firmware/test.sh` (16 runs pass). `node web/test_installer.js SITE` runs the real page
+  script against a model of the firmware's side: block sent and game starts; nothing to do when the game
+  runs; test mode sets the rewrite flag; test mode in game mode asks for the safe screen; a firmware that
+  stops asking is reported. The page's frame builder reproduces Felucca's handshake query byte for byte. The
+  page loads in the browser pane ("Ready.", no console errors); Install was not pressed.
+- NOT verified: the real protocol end to end (my model of the firmware and the firmware share an author),
+  flash writes to the data region from our own firmware, phase 1 from stock or Felucca with this package.
+- Build: firmware 266,696 B, recovery core id `9023e355ec4cc30f`, build id `036845b8`; `doom_part1.fwsc` SHA-256
+  `1aa8108500b51a8ec66323059dab5ab895e04b63eee6cf2c75715cdc8098ce7e`; `doom_data2.bin` SHA-256
+  `e4dcdbba8ca82687864b562c70bd6da8dae8b0db0066b1332b5b7602fce0858f` (equal to what is on the FM-1). Includes
+  the screen / volume features of the previous build. Symbols: `firmware/installed_1aa81085/`. Site:
+  `firmware/build/site_one`, preview `fm1-install-one`, port 8796 (stopped).
