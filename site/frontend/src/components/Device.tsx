@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BUTTONS, KEYS, KEY_LABELS, KNOBS, TIPS, type Group } from '../lib/controls'
-import { N, melt, paint, sameScene, type Frame, type Screen } from '../lib/screen'
+import { N, gameShot, hasGameShot, melt, paint, sameScene, type Frame, type Screen } from '../lib/screen'
 import './Device.css'
 
 // The FM-1 from above, to scale with Felucca's controls picture: 640 x 366 units.
@@ -20,8 +20,17 @@ const RIGHT_KNOBS: [string, number, number][] = [['KNOB 1', 360, 48], ['KNOB 2',
 function ScreenCanvas({ screen }: { screen: Screen }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const shown = useRef<{ screen: Screen; frame: Frame } | null>(null)
+  // the picture of the game is an image file: draw it once the browser has it
+  const [shot, setShot] = useState(hasGameShot)
+  useEffect(() => {
+    let mounted = true
+    if (!shot) void gameShot().then(() => mounted && setShot(true))
+    return () => {
+      mounted = false
+    }
+  }, [shot])
   // redraw when the picture changes, not whenever the page around it renders (which would cut a melt short)
-  const key = JSON.stringify(screen)
+  const key = JSON.stringify(screen) + (screen.kind === 'game' && shot ? ' drawn' : '')
 
   useEffect(() => {
     const ctx = ref.current?.getContext('2d')

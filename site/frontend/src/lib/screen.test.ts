@@ -7,27 +7,43 @@ import { N, melt, paint, sameScene } from './screen'
 const at = (f: Uint8ClampedArray, x: number, y: number) => [...f.subarray((y * N + x) * 4, (y * N + x) * 4 + 3)]
 
 describe('the drawn FM-1 screen', () => {
+  it('is the panel pixel for pixel', () => {
+    expect(N).toBe(240)
+    expect(paint({ kind: 'off' }).length).toBe(240 * 240 * 4)
+  })
+
   it('safe mode as the firmware draws it: blue, a white square a corner, a strip along the bottom', () => {
     const one = paint({ kind: 'safe', tone: 'blue', squares: 1, host: false })
-    expect(at(one, 30, 30)).toEqual([0, 0, 132])
-    expect(at(one, 2, 2)).toEqual([255, 255, 255])
-    expect(at(one, N - 3, 2)).toEqual([0, 0, 132])
-    expect(at(one, 5, N - 1)).toEqual([255, 255, 255])
+    expect(at(one, 120, 120)).toEqual([0, 0, 132])
+    expect(at(one, 8, 8)).toEqual([255, 255, 255])
+    expect(at(one, 23, 23)).toEqual([255, 255, 255])
+    expect(at(one, 24, 24)).toEqual([0, 0, 132])
+    expect(at(one, N - 12, 8)).toEqual([0, 0, 132])
+    expect(at(one, 20, N - 1)).toEqual([255, 255, 255])
     const two = paint({ kind: 'safe', tone: 'blue', squares: 2, host: true })
-    expect(at(two, N - 3, 2)).toEqual([255, 255, 255])
-    expect(at(two, 5, N - 1)).toEqual([0, 255, 0])
+    expect(at(two, N - 12, 8)).toEqual([255, 255, 255])
+    expect(at(two, 20, N - 1)).toEqual([0, 255, 0])
   })
 
   it('the data bar grows from the left', () => {
-    const white = (f: Uint8ClampedArray) => Array.from({ length: N }, (_, x) => at(f, x, 29)).filter((c) => c[0] === 255).length
-    expect(white(paint({ kind: 'bar', f: 0 }))).toBe(1)
-    expect(white(paint({ kind: 'bar', f: 0.5 }))).toBe(25)
-    expect(white(paint({ kind: 'bar', f: 1 }))).toBe(50)
+    const white = (f: Uint8ClampedArray) => Array.from({ length: N }, (_, x) => at(f, x, 116)).filter((c) => c[0] === 255).length
+    expect(white(paint({ kind: 'bar', f: 0 }))).toBe(4)
+    expect(white(paint({ kind: 'bar', f: 0.5 }))).toBe(100)
+    expect(white(paint({ kind: 'bar', f: 1 }))).toBe(200)
+  })
+
+  it('the picture of the game is a 240 x 240 PNG, and the panel is dark until it has been read', () => {
+    const png = readFileSync(fileURLToPath(new URL('../assets/e1m1-start.png', import.meta.url)))
+    expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+    expect(png.readUInt32BE(16)).toBe(N)
+    expect(png.readUInt32BE(20)).toBe(N)
+    // (no browser here, so it never is)
+    expect(at(paint({ kind: 'game' }), 120, 120)).toEqual([0, 0, 0])
   })
 
   it('a melt ends on exactly the new picture', () => {
     const from = paint({ kind: 'off' })
-    const to = paint({ kind: 'game' })
+    const to = paint({ kind: 'safe', tone: 'blue', squares: 2, host: false })
     let seed = 1
     const step = melt(from, to, () => ((seed = (seed * 16807) % 2147483647) % 1000) / 1000)
     const out = new Uint8ClampedArray(N * N * 4)

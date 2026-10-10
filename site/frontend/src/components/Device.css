@@ -13,7 +13,6 @@
 .device__screen {
   position: absolute;
   aspect-ratio: 1;
-  image-rendering: pixelated;
   border-radius: 1px;
 }
 
