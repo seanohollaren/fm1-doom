@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Wed, 7 Oct 2026 23:26:14 -0700
-Subject: [PATCH 02/11] Add host-test hooks: FM1_AUTOSTART and FM1_AUTOPLAY
+Subject: [PATCH] Add host-test hooks: FM1_AUTOSTART and FM1_AUTOPLAY
 
 Host builds only. FM1_AUTOSTART goes straight into E1M1; FM1_AUTOPLAY
 walks, turns and fires on a fixed script and logs player state.

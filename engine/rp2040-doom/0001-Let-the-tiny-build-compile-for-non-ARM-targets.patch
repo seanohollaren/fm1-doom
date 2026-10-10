@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Wed, 7 Oct 2026 23:12:27 -0700
-Subject: [PATCH 01/11] Let the tiny build compile for non-ARM targets
+Subject: [PATCH] Let the tiny build compile for non-ARM targets
 
 Guard the Thumb FixedMul assembly and breakpoint with __arm__, and allow
 the short-pointer base address to be overridden (FM1_SHORTPTR_BASE).
