@@ -1557,3 +1557,48 @@ Sean's changes after playing b7 (b7 is what `main` and the live site serve, pull
   anything cut from one stands, and CI's check for game data in the build is unchanged.
 - The drawn screen is now the panel pixel for pixel (240x240, was a 60x60 grid scaled up): the plain-colour
   screens are painted in 4x4 cells, so they look as before, and the melt moves in the same cells.
+
+## 2026-10-10 — Build "b9": drive on KNOB 3, the music's instrument on PRESETS (built and Mac-tested; NOT installed)
+
+Sean asked what else a spare knob could do to the sound; of the ideas he picked drive and the instrument swap.
+
+- VERIFIED in the source: three encoders were free, not one (KNOB 3, PRESETS, ALGORITHM), and the music is played
+  by an emulated FM chip (`i_oplmusic.c` over the OPL emulator), each MIDI channel on one of the 128 melodic
+  instruments of the game's GENMIDI lump, which also holds their names. ALGORITHM is still free.
+- **Drive** (`rp2040-doom/src/fm1/fm1_drive.h`, engine patch 0014). KNOB 3: off, then 16 steps. Each step is
+  more gain (4 to 64 times, equal ratios) into a soft clipper (y = 1.5x - 0.5x^3), then a level back down. It
+  runs on each block ahead of the filter, in the audio interrupt (`doom_dev.c`) and in the browser build. A step
+  is ramped across the block, off/on is a crossfade, and off returns without touching a sample.
+- MEASURED first, in the browser build: E1M1's music is quiet against full scale (RMS 1583 of 32768, peaks
+  10,696; pistol shots peak 15,104). That is why the gain starts at 4: below it nothing would clip. The 16 levels
+  were set on five seconds of that music so that its RMS comes out 1 dB up at step 1 and 4 dB up at step 16.
+  At step 16 nearly half the samples are flat-topped and the loudest sample is 3549, a third of the clean
+  music's peaks: loud sounds (shots) are squashed down to the music's level, as heavy distortion does.
+- **Cost** (from the b9 disassembly): the drive loop is 56 instructions a stereo frame, 28 per sample of one
+  channel, 2.5 million a second while it is on, none while off. With the filter on as well: about 101 per
+  sample, 8.9 million a second. The CPU's clock is still unknown; ENV shows the frame rate.
+- **Instrument** (`i_oplmusic.c`, 6 lines under `#if FM1`). PRESETS: at the bottom the music is as written; each
+  click up plays every melodic note on the next of the 128 instruments, and the message line says its number
+  and name. Percussion is left alone. Notes already sounding keep their instrument until they end. No cost
+  per sample. VERIFIED: as written E1M1 uses instruments 29, 30 and 34 (two guitars and a bass).
+- **EDIT** now turns off all three (filter, drive, instrument) and says "SOUND AS IT WAS".
+- Tests. `firmware/tests/drive_test.c` (new, 20 checks): off is bit-exact; the clipper never makes a louder
+  sample quieter, is the same both ways up, never exceeds its step's level for any input; a tone at the music's
+  level gets no quieter and no cleaner with each step (+1.3 dB at step 1, +6.7 dB at step 16, third harmonic
+  0.7 % then 32 %, a square wave's being 33 %); full scale in stays in range; silence stays silence; turning
+  through off and up and down makes no click; channels are separate. `web/test_sound_knobs.js` (new), on the
+  game's music: one click rounds the peaks (peak/RMS 6.6 to 3.1), the top step squares it (1.26, peak exactly
+  3549, +4.8 dB), back down restores it; PRESETS up 20 puts every melodic voice on instrument 19, far past the
+  top stops at 127, EDIT brings back 29, 30, 34 and the clean sound; no underruns. Gameplay, layout and filter
+  tests unchanged.
+- b9: firmware 268,992 B (+760 B), recovery core id `3088e3cfe01c1599`, build id `785d78fe`; `doom_part1.fwsc`
+  SHA-256 `ef6a2897…e1792a08`, `doom_code.fwsc` `489851ec…cae008c3`; data block 2 unchanged. Block 1 has
+  17,496 B spare. 19 package runs pass; the predicted flash (138 app sectors change, nothing else) passes
+  `check_dump.py`. VERIFIED: a clean rebuild from the committed source gives the same two files. Symbols:
+  `firmware/installed_ef6a2897/`. Source commit `1118d9e`.
+- DEAD END avoided: `firmware/build/doom.dis` was from 2026-10-09; the build never rewrote it, so b8's copy in
+  `installed_cd171ebf/` was an older build's listing (now regenerated from b8's own ELF). `build_in.sh` writes
+  the listing on every build from now on.
+- NOT VERIFIED until it runs on the FM-1: how drive sounds on the speaker and whether 4 dB at the top is too
+  much or too little; whether KNOB 3 and PRESETS are the encoders the HAL's numbering says; the frame rate with
+  drive and filter both on; whether some instruments are too quiet to be worth stopping on.
