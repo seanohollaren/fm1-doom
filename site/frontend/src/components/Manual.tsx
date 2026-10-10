@@ -1,6 +1,5 @@
 import { site } from '../site'
 import { Controls } from './Controls'
-import { FlashMap } from './FlashMap'
 import './Manual.css'
 
 const SCREENS: { cls: string; name: string; says: string }[] = [
@@ -84,15 +83,6 @@ export function Manual() {
             </ul>
           </article>
         </div>
-
-        <article className="manual__block manual__block--wide" id="changes">
-          <h3 className="display manual__h">What the install changes</h3>
-          <p className="manual__lede">
-            The FM-1 has one megabyte of memory for everything. Doom takes most of it, and leaves the boot code and the original
-            firmware’s presets alone.
-          </p>
-          <FlashMap />
-        </article>
       </div>
     </section>
   )

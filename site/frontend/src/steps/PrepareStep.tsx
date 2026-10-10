@@ -33,8 +33,10 @@ export function PrepareStep({ inst, announce }: { inst: Installer; announce: boo
         </li>
       </ol>
 
-      <h3 className="sub">What the install changes</h3>
-      <FlashMap />
+      <details className="changes">
+        <summary>What the install changes</summary>
+        <FlashMap />
+      </details>
 
       <label className="ack">
         <input type="checkbox" checked={state.ack} onChange={(e) => setAck(e.target.checked)} />
