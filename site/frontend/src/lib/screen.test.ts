@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { BUTTONS, KEYS } from './controls'
+import { BUTTONS, KEYS, KEY_LABELS, KNOBS, TIPS } from './controls'
 import { N, melt, paint, sameScene } from './screen'
 
 const at = (f: Uint8ClampedArray, x: number, y: number) => [...f.subarray((y * N + x) * 4, (y * N + x) * 4 + 3)]
@@ -41,6 +41,21 @@ describe('the drawn FM-1 screen', () => {
     expect(sameScene({ kind: 'bar', f: 0.1 }, { kind: 'bar', f: 0.9 })).toBe(true)
     expect(sameScene({ kind: 'safe', tone: 'blue', squares: 1, host: false }, { kind: 'safe', tone: 'blue', squares: 2, host: false })).toBe(false)
     expect(sameScene({ kind: 'solid', tone: 'green' }, { kind: 'solid', tone: 'red' })).toBe(false)
+  })
+})
+
+describe('the words on the drawn FM-1', () => {
+  it('every note key the game uses carries one word, or two', () => {
+    expect(Object.keys(KEY_LABELS).sort()).toEqual(Object.keys(KEYS).sort())
+    for (const words of Object.values(KEY_LABELS)) {
+      expect(words.length === 1 || words.length === 2).toBe(true)
+      for (const w of words) expect(w).toMatch(/^[A-Za-z]{2,7}$/) // "Forward" is as long as fits across a key
+    }
+  })
+
+  it('every button and knob the game uses explains itself under the pointer, and nothing else does', () => {
+    expect(Object.keys(TIPS).sort()).toEqual([...Object.keys(BUTTONS), ...Object.keys(KNOBS)].sort())
+    for (const tip of Object.values(TIPS)) expect(tip).toMatch(/^[A-Z].{3,90}\.$/)
   })
 })
 

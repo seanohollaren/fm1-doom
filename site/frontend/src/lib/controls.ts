@@ -27,6 +27,28 @@ export const BUTTONS: Record<string, Group> = {
 
 export const KNOBS: Record<string, Group> = { SELECT: 'weapon', 'KNOB 4': 'weapon', MASTER: 'volume', 'KNOB 1': 'filter', 'KNOB 2': 'filter' }
 
+/** what is written on each note key in the drawing: one word, or two with a line each */
+export const KEY_LABELS: Record<number, string[]> = {
+  0: ['Strafe', 'Left'], 1: ['Turn', 'Left'], 2: ['Back'], 3: ['Forward'], 4: ['Strafe', 'Right'], 5: ['Turn', 'Right'],
+  24: ['Fire'], 25: ['Run'], 26: ['Open'],
+}
+
+/** what the pointer is told over a button or a knob in the drawing */
+export const TIPS: Record<string, string> = {
+  MASTER: 'Volume. Right down is silent.',
+  SELECT: 'Previous and next weapon. With the menu open, moves through it.',
+  'KNOB 1': 'Filter sweep. Left muffles the sound, right thins it; the centre is off.',
+  'KNOB 2': 'Filter resonance: how hard the filter rings where it cuts.',
+  'KNOB 4': 'Previous and next weapon.',
+  'OCT−': 'Previous weapon.',
+  'OCT+': 'Next weapon.',
+  FX: 'Answers yes when the game asks.',
+  EDIT: 'Turns the filter off.',
+  HOME: 'Opens and closes the menu.',
+  PLAY: 'Chooses in the menu.',
+  REC: 'Fire.',
+}
+
 export const LEGEND: { group: Group; rows: { keys: string[]; what: string }[] }[] = [
   {
     group: 'move',
