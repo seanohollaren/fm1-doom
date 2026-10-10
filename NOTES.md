@@ -1505,3 +1505,38 @@ Sean's idea: this is a synthesizer, so let a knob filter the game's sound while 
   encoders the HAL's numbering says, and the frame rate with the filter on.
 - Local test pages (production builds, static): b6 on port 5183 (`dist-b6`), b7 on port 5184 (`dist-b7`). The
   site in the pull request still serves b5; the working tree holds b7 and its page text, uncommitted.
+
+## 2026-10-10 — Build "b8": a new keyboard layout; no screen link speed button (built and Mac-tested; NOT installed)
+
+Sean's changes after playing b7 (b7 is what `main` and the live site serve, pull request #2).
+
+- **Repository state found first.** `main` served b7 but did not hold its source: the three b7 commits
+  (`83f3af3`, `7dcc819`, `cbf6afe`) were pushed to `work` after pull request #1 had merged, and pull request #2
+  carried only the site's copy of the build. Branch `controls-b8` (off `main`) starts by merging `work`, so
+  engine patch 0012, the filter tests and the b7 notes are back in line. The same pull request #2 had also
+  committed `site/frontend/dist-b7/` (my local test build, 25 files, no game data): no longer tracked.
+- **Layout** (engine patch 0013, `fm1_controls.c`). Left hand, the six lowest keys: F#3 turn left, G#3 forward,
+  A#3 turn right; under them F3 strafe left, G3 back, A3 strafe right. Right hand: F5 fire, G5 use, F#5 run.
+  REC still fires. Nothing now: B3, C4 (were turn right, strafe right), D5, E5 (were a second use and fire).
+  The low F# no longer runs: it turns.
+- **Screen link.** The LFO button stepped the link's clock down from the fastest rate; it only made the
+  picture slower. Gone: `fm1_lcd_speed_next` is removed from the engine and from `doom_dev.c`, which now knows
+  two rates, the game's (n = 0, "60 MHz", the default since b5) and Felucca's for its own screens. SCL (picture
+  shape) and ENV (frame rate) still work; the site no longer mentions them.
+- VERIFIED in the browser build, `node web/test_controls.js` (new): each key held in E1M1 and the player's
+  position and facing read back: forward +116, back -116, strafe left -106, strafe right +111 (map units in
+  0.4 s), turn left +28/256 of a circle, turn right -28, forward with F#5 held 232 (twice the walk); B3, C4, D5,
+  E5 change nothing. Gameplay test unchanged (2 awake, health 25 at t = 13); filter-in-game test passes;
+  picture-shape test passes (its LFO step removed).
+- b8: firmware 268,232 B (-196 B), recovery core id `182d9edc7bc9cbce` (the device unit changed), build id
+  `2aee13da`; `doom_part1.fwsc` SHA-256 `cd171ebf…5f8d1e4b`, `doom_code.fwsc` `9376e017…7d6e0075`; data block 2
+  unchanged (`e4dcdbba…`). Block 1 has 18,264 B spare. 18 package runs pass (`firmware/test.sh`); the
+  predicted flash after b8 over b7 (138 app sectors change, nothing outside the app area) passes
+  `check_dump.py`. Symbols: `firmware/installed_cd171ebf/`. Source commit `ff38dea`.
+- Build note: `firmware/pack.py` needs `JIELI_TOOLCHAIN=$HOME/.jieli/toolchain AC79_SDK=$HOME/fw-AC79_AIoT_SDK`
+  in the environment (for the loader variant), as Felucca's build does.
+- Site (branch only): serves `doom-b8.fwsc`; the drawing and list show the new layout; the "Picture and sound"
+  group is now "Volume" (MASTER alone). 32 site tests pass, production build is clean.
+- NOT VERIFIED until it runs on the FM-1: that the layout feels right in the hand, and nothing else — the
+  screen link rate is the one b5 to b7 already used.
+- ASSUMED: Sean has run b7 on the device (he merged it and came back with layout changes); he has not said so.
