@@ -1,0 +1,192 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Fri, 9 Oct 2026 16:19:39 -0700
+Subject: [PATCH 09/11] FM-1: three picture shapes (SCL), screen link speed
+ steps (LFO), frame-rate readout (ENV)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |  5 +++++
+ src/fm1/fm1_controls.c | 44 +++++++++++++++++++++++++++++++++++++++
+ src/fm1/fm1_video.c    | 47 +++++++++++++++++++++++++++++++-----------
+ src/fm1/fm1_web.c      |  1 +
+ 4 files changed, 85 insertions(+), 12 deletions(-)
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index 240874d..a6f4e6b 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -37,3 +37,8 @@ extern uint32_t fm1_audio_underruns;
+ 
+ void fm1_present(void);                  // fm1_video.c: show the frame the game has finished
+ extern uint32_t fm1_frames;
++// picture shape on the square panel (fm1_video.c): 240x150 (square pixels), 240x180 (4:3), 240x240 (stretched)
++void fm1_view_next(void);
++const char *fm1_view_name(void);
++// screen link: step to the next clock rate; returns it in MHz, or 0 where the rate cannot be changed
++int fm1_lcd_speed_next(void);
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 3f1ce29..ee28747 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -7,14 +7,37 @@
+ //                                 G3 turn left   A3 back   B3 turn right        F3 / C4 strafe left / right
+ //   right hand, top of the keyboard:  E5 / F5 fire          D5 / G5 use (open doors)   F#5 run
+ //   buttons:  HOME menu (Esc)   PLAY select (Enter)   REC fire   OCT- / OCT+ previous / next weapon   FX yes
++//             SCL next picture shape   LFO next screen link speed   ENV show the frame rate
++//             (the last three answer with a line on the game's message display, so only while a level is up)
+ //   knobs:    SELECT moves through menus (weapons while playing)   KNOB 4 previous / next weapon
+ //
+ #include "doomkeys.h"
+ #include "doomtype.h"
+ #include "m_controls.h"
+ extern boolean menuactive;                                   /* doom/m_menu.c */
++#include "doomstat.h"
+ #include "fm1.h"
+ 
++static char fm1_msg[40];
++static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n < 0: no number) on the HUD */
++{
++    char *p = fm1_msg, t[12];
++    int i = 0;
++    while (*a && p < fm1_msg + 24)
++        *p++ = *a++;
++    if (n >= 0) {
++        do
++            t[i++] = (char)('0' + n % 10);
++        while ((n /= 10) && i < 11);
++        while (i)
++            *p++ = t[--i];
++    }
++    while (*b && p < fm1_msg + 39)
++        *p++ = *b++;
++    *p = 0;
++    players[consoleplayer].message = fm1_msg;
++}
++
+ #define FM1_KEY_PREVWEAPON '['
+ #define FM1_KEY_NEXTWEAPON ']'
+ 
+@@ -57,7 +80,28 @@ void fm1_controls_init(void)
+ 
+ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NKNOB])
+ {
++    static uint32_t was, t0, f0, fps;
++    uint32_t pressed = buttons & ~was, now = fm1_millis();
+     uint8_t want[256 / 8] = {0};
++    was = buttons;
++    if (now - t0 >= 1000u) {                                  /* frames shown per second, over the last second */
++        fps = (fm1_frames - f0) * 1000u / (now - t0);
++        f0 = fm1_frames;
++        t0 = now;
++    }
++    if (pressed & (1u << FM1_BTN_SCL)) {
++        fm1_view_next();
++        fm1_say(fm1_view_name(), -1, "");
++    }
++    if (pressed & (1u << FM1_BTN_LFO)) {
++        int mhz = fm1_lcd_speed_next();
++        if (mhz)
++            fm1_say("SCREEN LINK ", mhz, " MHZ");
++        else
++            fm1_say("SCREEN LINK IS FIXED HERE", -1, "");
++    }
++    if (pressed & (1u << FM1_BTN_ENV))
++        fm1_say("", (int)fps, " FRAMES A SECOND");
+     for (unsigned i = 0; i < FM1_NMAP; i++) {
+         unsigned s = FM1_MAP[i].src;
+         if (s < 32u ? (notes >> s) & 1u : (buttons >> (s - 32u)) & 1u)
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index 9c1861f..a7c1b7e 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -594,9 +594,20 @@ void __no_inline_not_in_flash_func(new_frame_stuff)() {
+ // ---- END copied from src/pico/i_video.c
+ 
+ #define FM1_LCD_W 240
+-#define FM1_VIEW_H 150                     /* 200 lines, 3 of every 4 kept */
+-#define FM1_VIEW_Y ((240 - FM1_VIEW_H) / 2)
++#define FM1_LCD_H 240
+ #define FM1_STRIP_H 4                      /* lines per LCD transfer (1.9 KB each, two buffers) */
++// The 200 source lines become this many panel rows, centred: 150 keeps 3 lines of every 4 (square pixels, as the
++// width is squeezed 4 -> 3), 180 keeps 9 of 10 (the 4:3 shape Doom was drawn for), 240 shows every fifth line
++// twice (the whole panel; tall pixels).
++static const uint8_t FM1_VIEW_ROWS[] = {150, 180, 240};
++static const char *const FM1_VIEW_NAMES[] = {"VIEW 240 X 150", "VIEW 240 X 180", "VIEW FULL SCREEN"};
++static uint8_t fm1_view, fm1_view_bands = 1;                /* bands: the rows outside the picture need blacking */
++void fm1_view_next(void)
++{
++    fm1_view = (uint8_t)((fm1_view + 1u) % sizeof FM1_VIEW_ROWS);
++    fm1_view_bands = 1;
++}
++const char *fm1_view_name(void) { return FM1_VIEW_NAMES[fm1_view]; }
+ 
+ static uint32_t fm1_line[SCREENWIDTH / 2 + 2];             /* one composed scanline, RGB565 (word aligned) */
+ // two strip buffers, used in turn: the platform may still be sending one (DMA) while the next is composed.
+@@ -616,13 +627,24 @@ static void fm1_squeeze(uint16_t *out, const uint16_t *in) {
+ }
+ 
+ void fm1_present(void) {
+-    int out_y = 0, n = 0;
++    int out_y = 0, n = 0, acc = 0;
++    const int rows = FM1_VIEW_ROWS[fm1_view], view_y = (FM1_LCD_H - rows) / 2;
+     uint16_t *fm1_strip = fm1_strips[fm1_strip_i];
+     fm1_alive();
+     fm1_audio_pump();
+     new_frame_stuff();
+     if (!scanline_funcs[display_video_type])
+         return;                            /* text mode (start-up, ENDOOM): not shown on the FM-1 */
++    if (fm1_view_bands) {                  /* a new shape: black above and below it, once */
++        fm1_view_bands = 0;
++        memset(fm1_strip, 0, sizeof fm1_strips[0]);
++        for (int band = 0; band < 2; band++) {              /* [0, view_y) and [view_y + rows, 240) */
++            int y = band ? view_y + rows : 0, end = band ? FM1_LCD_H : view_y;
++            for (; y < end; y += FM1_STRIP_H)
++                fm1_lcd_blit(0, (unsigned)y, FM1_LCD_W, (unsigned)(end - y < FM1_STRIP_H ? end - y : FM1_STRIP_H), fm1_strip);
++        }
++        fm1_strip = fm1_strips[fm1_strip_i ^= 1];   /* the black strip may still be going out: compose in the other */
++    }
+     for (int scanline = 0; scanline < SCREENHEIGHT; scanline++) {
+         uint16_t *dest = (uint16_t *)fm1_line;
+         scanline_funcs[display_video_type](fm1_line, scanline);
+@@ -650,18 +672,19 @@ void fm1_present(void) {
+                 }
+             }
+         }
+-        if ((scanline & 3) == 3)
+-            continue;                      /* the patches above still had to advance through this line */
+-        fm1_squeeze(fm1_strip + n * FM1_LCD_W, dest);
+-        if (++n == FM1_STRIP_H) {
+-            fm1_lcd_blit(0, FM1_VIEW_Y + out_y, FM1_LCD_W, n, fm1_strip);
+-            fm1_strip = fm1_strips[fm1_strip_i ^= 1];
+-            out_y += n;
+-            n = 0;
++        /* this source line becomes 0, 1 or 2 panel rows (the patches above had to advance through it anyway) */
++        for (acc += rows; acc >= SCREENHEIGHT; acc -= SCREENHEIGHT) {
++            fm1_squeeze(fm1_strip + n * FM1_LCD_W, dest);
++            if (++n == FM1_STRIP_H) {
++                fm1_lcd_blit(0, (unsigned)(view_y + out_y), FM1_LCD_W, (unsigned)n, fm1_strip);
++                fm1_strip = fm1_strips[fm1_strip_i ^= 1];
++                out_y += n;
++                n = 0;
++            }
+         }
+     }
+     if (n) {
+-        fm1_lcd_blit(0, FM1_VIEW_Y + out_y, FM1_LCD_W, n, fm1_strip);
++        fm1_lcd_blit(0, (unsigned)(view_y + out_y), FM1_LCD_W, (unsigned)n, fm1_strip);
+         fm1_strip_i ^= 1;
+     }
+     fm1_frames++;
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 29eef78..739c2bc 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -55,6 +55,7 @@ static void fm1_web_split(void)
+     fm1_part2 = malloc(total - best);
+     memcpy(fm1_part2, tiny_whd + best, total - best);
+ }
++int fm1_lcd_speed_next(void) { return 0; }
+ const uint8_t *fm1_whd_base(void) { fm1_web_split(); return fm1_part1; }
+ const uint8_t *fm1_whd_part2(uint32_t *split) { fm1_web_split(); *split = fm1_split; return fm1_part2; }
+ void fm1_alive(void) {}

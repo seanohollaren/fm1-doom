@@ -1,0 +1,69 @@
+name: ✅ CI
+
+# Checks the installer site (site/) and the install logic it shares with web/. The firmware itself is not built
+# here: it needs the JieLi toolchain; what the site serves is a committed build (site/sync_firmware.py).
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  site:
+    name: 🎨 Site
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            site/frontend/package-lock.json
+            site/infra/package-lock.json
+
+      - name: 📥 Install frontend dependencies
+        working-directory: site/frontend
+        run: npm ci
+
+      - name: 🔍 Type check
+        working-directory: site/frontend
+        run: npm run type-check
+
+      # Enforces the theme-token rule: no raw colors in component CSS
+      - name: 🎨 Check design tokens
+        working-directory: site/frontend
+        run: npm run check:tokens
+
+      # The install flow against a stand-in FM-1, and the shipped firmware and converter against their hashes
+      - name: 🧪 Test
+        working-directory: site/frontend
+        run: npm test
+
+      - name: 🏗️ Build
+        working-directory: site/frontend
+        run: npm run build
+
+      # No game data may ever be published: nothing WAD-shaped in the build output
+      - name: 🚫 No game data in the build
+        run: |
+          if find site/frontend/dist -type f \( -iname '*.wad' -o -iname '*.whx' -o -iname '*.whd' \) | grep .; then
+            echo "❌ game data found in the build output"; exit 1
+          fi
+          echo "✅ none"
+
+      - name: 📥 Install CDK dependencies
+        working-directory: site/infra
+        run: npm ci
+
+      # Synthesizes both stacks from the committed context (no AWS access needed): catches CDK errors before a deploy
+      - name: 🏗️ CDK synth
+        working-directory: site/infra
+        run: npx tsc --noEmit && npx cdk synth --quiet

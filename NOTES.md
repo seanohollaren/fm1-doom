@@ -1410,3 +1410,28 @@ level's own textures, flats, sprites, sounds and music; scratch script, native `
   page downloaded the file from the Internet Archive, verified, cut, converted and packed it in 4.2–4.6 s; the
   result is the tested data. 32 tests pass.
 - This is the first time the page contacts another host, and only on that button.
+
+## 2026-10-09 ~21:30 — Repository, licence, deploy set-up (nothing deployed)
+
+- VERIFIED (AWS, read-only calls): `deadlockinteractive.com` is registered at Amazon Registrar (auto-renew, to
+  2028-02), its hosted zone `Z07104152PEL021SX0LUQ` already exists and the registrar's name servers are that
+  zone's. The zone holds a Squarespace site's records (apex A, `www` CNAME, a verification CNAME): the CDK must
+  not create a zone and does not touch those; it adds `doom.` only. No CAA record, no existing certificate.
+  CDK bootstrap version 30 is in us-east-1 and us-west-2, and its roles trust the account.
+- `site/infra/cdk.context.json` now holds the real zone id (from `cdk synth`, a read-only look-up), so synth
+  needs no AWS access; CI runs it.
+- Deploy role: following beverage-chilling, a role of its own (`github-actions-deploy-fm1-doom`) made by
+  `scripts/setup-github-oidc.sh`, which Sean runs once. It may only assume the CDK bootstrap roles in the two
+  regions. The script asks GitHub for the repository's token subject form (new repositories use the immutable
+  one with ids). The shared `github-actions-deploy` role is not used and was not changed.
+- Workflows in beverage-chilling's style: `ci.yml` (pull requests: type check, tokens, tests, build, no game data
+  in the output, `cdk synth`) and `deploy.yml` (push to `main`: test gate, build, `cdk deploy`, smoke tests that
+  compare the live firmware and converter with the committed hashes).
+- Licence: Felucca is GPL-3.0-only (its `LICENSE`, `LICENSING.md`), which allows this use on condition that the
+  source of what is distributed is offered under the same licence. Added `LICENSE` (GPL-3.0), a `README.md` with
+  credits and the build's upstream versions, and `engine/`: our rp2040-doom work as a `git format-patch` series
+  on upstream `29a453c`, with `engine/get.sh`. VERIFIED: applying the series to a fresh checkout of that commit
+  gives the same tree as the local `fm1-port` branch (`9f6171d8…`).
+- QUEUED for the next firmware build (not done; no firmware was rebuilt): the firmware still names itself
+  "Felucca" on USB (Felucca's `usb.c`, string descriptor `STR2`, unmodified). That name is Hügelton Instruments'.
+  Rename to "FM-1 Doom"; Felucca's and our installer both find ports by `/fm-1|felucca|…/`, so either keeps working.

@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Fri, 9 Oct 2026 17:37:54 -0700
+Subject: [PATCH 10/11] FM-1: the picture starts on the whole panel
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_video.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index a7c1b7e..1023476 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -601,7 +601,8 @@ void __no_inline_not_in_flash_func(new_frame_stuff)() {
+ // twice (the whole panel; tall pixels).
+ static const uint8_t FM1_VIEW_ROWS[] = {150, 180, 240};
+ static const char *const FM1_VIEW_NAMES[] = {"VIEW 240 X 150", "VIEW 240 X 180", "VIEW FULL SCREEN"};
+-static uint8_t fm1_view, fm1_view_bands = 1;                /* bands: the rows outside the picture need blacking */
++static uint8_t fm1_view = 2, fm1_view_bands = 1;            /* starts on the whole panel (Sean's choice on the device);
++                                                             * bands: the rows outside the picture need blacking */
+ void fm1_view_next(void)
+ {
+     fm1_view = (uint8_t)((fm1_view + 1u) % sizeof FM1_VIEW_ROWS);

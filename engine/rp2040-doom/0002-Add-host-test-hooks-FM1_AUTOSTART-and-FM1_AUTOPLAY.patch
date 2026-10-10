@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Wed, 7 Oct 2026 23:26:14 -0700
+Subject: [PATCH 02/11] Add host-test hooks: FM1_AUTOSTART and FM1_AUTOPLAY
+
+Host builds only. FM1_AUTOSTART goes straight into E1M1; FM1_AUTOPLAY
+walks, turns and fires on a fixed script and logs player state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/doom/d_main.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/doom/d_main.c b/src/doom/d_main.c
+index 01cb20e..28e1142 100644
+--- a/src/doom/d_main.c
++++ b/src/doom/d_main.c
+@@ -567,6 +567,20 @@ void D_DoomLoop (void)
+ 
+     while (1)
+     {
++#if !PICO_ON_DEVICE
++        {   /* host test: FM1_AUTOPLAY walks, turns and fires on a fixed script */
++            static int fm1_auto = -1, fm1_f;
++            if (fm1_auto < 0) fm1_auto = getenv("FM1_AUTOPLAY") != NULL;
++            if (fm1_auto) {
++                event_t ev = {0};
++                int ph = (fm1_f++ / 35) % 8;
++                ev.type = ev_keydown; ev.data1 = key_up; D_PostEvent(&ev);
++                ev.type = (ph == 3 || ph == 6) ? ev_keydown : ev_keyup; ev.data1 = key_right; D_PostEvent(&ev);
++                ev.type = (fm1_f % 20 < 3) ? ev_keydown : ev_keyup; ev.data1 = key_fire; D_PostEvent(&ev);
++                if (fm1_f % 140 == 0) fprintf(stderr, "FM1 f=%d state=%d tic=%d health=%d ammo=%d kills=%d\n", fm1_f, gamestate, gametic, players[0].health, players[0].ammo[0], players[0].killcount);
++            }
++        }
++#endif
+         D_RunFrame();
+ #if PICO_DOOM_INFO
+         static uint8_t x = 0;
+@@ -2117,6 +2131,11 @@ void D_DoomMain (void)
+ 
+     if (gameaction != ga_loadgame )
+     {
++#if !PICO_ON_DEVICE
++	if (getenv("FM1_AUTOSTART")) {      /* host test: straight into E1M1, no title or demo */
++	    G_InitNew (sk_medium, 1, 1);
++	} else
++#endif
+ 	if (autostart || netgame)
+ 	    G_InitNew (startskill, startepisode, startmap);
+ 	else

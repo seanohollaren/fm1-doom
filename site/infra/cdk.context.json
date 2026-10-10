@@ -1,0 +1,10 @@
+{
+  "hosted-zone:account=514220683169:domainName=deadlockinteractive.com:region=us-east-1": {
+    "Id": "/hostedzone/Z07104152PEL021SX0LUQ",
+    "Name": "deadlockinteractive.com."
+  },
+  "hosted-zone:account=514220683169:domainName=deadlockinteractive.com:region=us-west-2": {
+    "Id": "/hostedzone/Z07104152PEL021SX0LUQ",
+    "Name": "deadlockinteractive.com."
+  }
+}

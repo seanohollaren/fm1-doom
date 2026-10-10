@@ -1,7 +1,7 @@
 // The few facts about this site that are not code.
 export const site = {
   /** where the source of the firmware and of this page can be had (the GPL asks for it); empty hides the link */
-  sourceUrl: '',
+  sourceUrl: 'https://github.com/seanohollaren/fm1-doom',
   /**
    * Where the page may download id Software's shareware DOOM1.WAD v1.9 from, in the visitor's browser, in this
    * order. Each must allow cross-site requests; the page accepts only the exact file (size and SHA-256), whatever

@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Wed, 7 Oct 2026 23:12:27 -0700
+Subject: [PATCH 01/11] Let the tiny build compile for non-ARM targets
+
+Guard the Thumb FixedMul assembly and breakpoint with __arm__, and allow
+the short-pointer base address to be overridden (FM1_SHORTPTR_BASE).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/doomtype.h | 8 +++++++-
+ src/m_fixed.h  | 2 +-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/doomtype.h b/src/doomtype.h
+index 06caf3d..2a8e318 100644
+--- a/src/doomtype.h
++++ b/src/doomtype.h
+@@ -194,7 +194,9 @@ typedef uint8_t floor_ceiling_clip_t;
+ 
+ #if PICO_ON_DEVICE
+ #include <assert.h>
+-#if !PICO_RP2350
++#ifdef FM1_SHORTPTR_BASE
++#define SHORTPTR_BASE FM1_SHORTPTR_BASE
++#elif !PICO_RP2350
+ #define SHORTPTR_BASE 0x20000000
+ #else
+ #define SHORTPTR_BASE 0x20030000
+@@ -207,7 +209,11 @@ static inline shortptr_t ptr_to_shortptr(void *p) {
+     if (!p) return 0;
+     uintptr_t v = (uintptr_t)p;
+     if (!(v>=SHORTPTR_BASE+4 && v < SHORTPTR_BASE + 0x40000 && !(v&3))) {
++#if defined(__arm__)
+         asm("bkpt #0");
++#else
++        __builtin_trap();
++#endif
+     }
+     assert(v>=SHORTPTR_BASE+4 && v < SHORTPTR_BASE + 0x40000 && !(v&3));
+ #if SHORTPTR_BASE == 0x20000000
+diff --git a/src/m_fixed.h b/src/m_fixed.h
+index 0da8cc1..181d951 100644
+--- a/src/m_fixed.h
++++ b/src/m_fixed.h
+@@ -37,7 +37,7 @@ typedef int fixed_t;
+ #if PICO_BUILD
+ #include <stdint.h>
+ static inline fixed_t FixedMulInline(fixed_t a, fixed_t b) {
+-#if PICO_ON_DEVICE
++#if PICO_ON_DEVICE && defined(__arm__)
+     uint32_t tmp1, tmp2, tmp3;
+     __asm__ volatile (
+     ".syntax unified\n"

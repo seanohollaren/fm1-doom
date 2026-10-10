@@ -57,15 +57,19 @@ cd site/frontend && npm test                                        # the sharew
 Then edit `buildNotes` in `frontend/src/site.ts` (what a player should know about this build), check the controls
 list (`src/lib/controls.ts`; the test compares it with the firmware source), commit, and push.
 
-## Before the first deploy
+## Deploying
 
-1. **Hosted zone.** `deadlockinteractive.com` needs a public hosted zone in Route 53 in account 514220683169,
-   and the domain's name servers must be that zone's. A transferred domain does not get one by itself.
-   `aws route53 list-hosted-zones-by-name --dns-name deadlockinteractive.com`
-2. **GitHub repository** for this project, with a `main` branch (today the work is on `work`, with no remote).
-3. **Deploy role.** Add the repository to the trust policy of `github-actions-deploy`. New repositories use the
-   immutable subject form: `gh api repos/seanohollaren/<repo>/actions/oidc/customization/sub`.
-4. **Source link.** The firmware is GPL: set `sourceUrl` in `frontend/src/site.ts` to the public repository
-   (and publish the `fm1-port` branch of rp2040-doom, which is a separate clone).
-5. Optional: run `npx cdk synth` in `infra/` once with AWS credentials and commit the `cdk.context.json` it
-   writes (the hosted zone's id), as `static-personal-site` does.
+A merge to `main` that touches `site/` or `web/` deploys: `.github/workflows/deploy.yml` runs the tests, builds
+the frontend, runs `cdk deploy` for both stacks, then checks that the live page answers and serves exactly the
+committed firmware and converter. `ci.yml` runs the same checks (and a `cdk synth`) on every pull request.
+Nobody deploys by hand.
+
+- **DNS.** `deadlockinteractive.com` already has its hosted zone (`Z07104152PEL021SX0LUQ`, in
+  `infra/cdk.context.json`) and the registrar points at it. The zone also carries the records of the Squarespace
+  site on the apex and `www`; the stacks add only `doom.` (A and AAAA) and the certificate's validation record.
+- **The deploy role**, `github-actions-deploy-fm1-doom`, is made once, with admin credentials, by
+  `scripts/setup-github-oidc.sh` (the same arrangement as beverage-chilling): GitHub's OIDC tokens for this
+  repository may assume it, and it may do nothing but assume CDK's bootstrap roles in us-east-1 and us-west-2.
+  Until it exists the deploy job fails at "Configure AWS credentials".
+- **Source.** The page's footer links to this repository, because the firmware it serves is GPL: the
+  repository must be public while the site is live.

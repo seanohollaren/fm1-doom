@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Thu, 8 Oct 2026 00:13:10 -0700
+Subject: [PATCH 07/11] FM-1: debug hooks for the browser build; host hook to
+ place the player
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/doom/d_main.c   | 22 ++++++++++++++++---
+ src/fm1/fm1_debug.c | 52 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 71 insertions(+), 3 deletions(-)
+ create mode 100644 src/fm1/fm1_debug.c
+
+diff --git a/src/doom/d_main.c b/src/doom/d_main.c
+index 9182b92..3e69e5f 100644
+--- a/src/doom/d_main.c
++++ b/src/doom/d_main.c
+@@ -575,15 +575,31 @@ void D_DoomLoop (void)
+     {
+ #if !PICO_ON_DEVICE
+         {   /* host test: FM1_AUTOPLAY walks, turns and fires on a fixed script */
++            extern boolean P_TeleportMove(mobj_t *thing, fixed_t x, fixed_t y);
+             static int fm1_auto = -1, fm1_f;
+             if (fm1_auto < 0) fm1_auto = getenv("FM1_AUTOPLAY") != NULL;
+             if (fm1_auto) {
+                 event_t ev = {0};
+                 int ph = (fm1_f++ / 35) % 8;
+-                ev.type = ev_keydown; ev.data1 = key_up; D_PostEvent(&ev);
+-                ev.type = (ph == 3 || ph == 6) ? ev_keydown : ev_keyup; ev.data1 = key_right; D_PostEvent(&ev);
++                ev.type = getenv("FM1_WARP") ? ev_keyup : ev_keydown; ev.data1 = key_up; D_PostEvent(&ev);
++                ev.type = ((ph == 3 || ph == 6) && !getenv("FM1_WARP")) ? ev_keydown : ev_keyup; ev.data1 = key_right; D_PostEvent(&ev);
+                 ev.type = (fm1_f % 20 < 3) ? ev_keydown : ev_keyup; ev.data1 = key_fire; D_PostEvent(&ev);
+-                if (fm1_f % 140 == 0) fprintf(stderr, "FM1 f=%d state=%d tic=%d health=%d ammo=%d kills=%d\n", fm1_f, gamestate, gametic, players[0].health, players[0].ammo[0], players[0].killcount);
++                if (fm1_f == 70 && getenv("FM1_WARP") && players[0].mo) {   /* FM1_WARP=x,y: stand somewhere else */
++                    int wx = 0, wy = 0;
++                    sscanf(getenv("FM1_WARP"), "%d,%d", &wx, &wy);
++                    fprintf(stderr, "FM1 warp %d,%d -> %d\n", wx, wy, (int)P_TeleportMove(players[0].mo, wx << 16, wy << 16));
++                }
++                if (fm1_f % 140 == 0) {
++                    int awake = 0, monsters = 0;
++                    extern thinker_t thinkercap;
++                    if (gamestate == GS_LEVEL)
++                        for (thinker_t *t = thinker_next(&thinkercap); t != &thinkercap; t = thinker_next(t))
++                            if (t->function == ThinkF_P_MobjThinker && (((mobj_t *)t)->flags & MF_COUNTKILL)) {
++                                monsters++;
++                                awake += mobj_state_num((mobj_t *)t) != mobj_info((mobj_t *)t)->spawnstate && mobj_state_num((mobj_t *)t) != mobj_info((mobj_t *)t)->spawnstate + 1;
++                            }
++                    fprintf(stderr, "FM1 f=%d state=%d tic=%d health=%d ammo=%d kills=%d monsters=%d awake=%d\n", fm1_f, gamestate, gametic, players[0].health, players[0].ammo[0], players[0].killcount, monsters, awake);
++                }
+             }
+         }
+ #endif
+diff --git a/src/fm1/fm1_debug.c b/src/fm1/fm1_debug.c
+new file mode 100644
+index 0000000..d7df838
+--- /dev/null
++++ b/src/fm1/fm1_debug.c
+@@ -0,0 +1,52 @@
++// Browser build only: dump the level's thinkers to the console (Module._fm1_web_dump()).
++#include <stdio.h>
++#include "doomdef.h"
++#include "doom/p_local.h"
++#include "doom/doomstat.h"
++extern thinker_t thinkercap;
++int fm1_web_dump(void)
++{
++    int n = 0, shown = 0;
++    if (gamestate != GS_LEVEL)
++        return -1;                       /* no level: the thinker list is not valid */
++    for (thinker_t *t = thinker_next(&thinkercap); t != &thinkercap; t = thinker_next(t), n++) {
++        if (t->function == ThinkF_P_MobjThinker) {
++            mobj_t *m = (mobj_t *)t;
++            if ((m->flags & MF_COUNTKILL) && shown < 6) {
++                shown++;
++                printf("mobj type %d state %d tics %d flags %08x static %d x %d y %d\n", (int)m->type, (int)mobj_state_num(m), (int)m->tics,
++                       (unsigned)m->flags, (int)mobj_is_static(m), m->xy.x >> 16, m->xy.y >> 16);
++            }
++        }
++    }
++    if (players[0].mo) {
++        mobj_t *pm = players[0].mo;
++        printf("player x %d y %d angle %u\n", pm->xy.x >> 16, pm->xy.y >> 16, (unsigned)(mobj_angle(pm) >> 24));
++        for (thinker_t *t = thinker_next(&thinkercap); t != &thinkercap; t = thinker_next(t))
++            if (t->function == ThinkF_P_MobjThinker) {
++                mobj_t *m = (mobj_t *)t;
++                int dx = (m->xy.x - pm->xy.x) >> 16, dy = (m->xy.y - pm->xy.y) >> 16;
++                if (m != pm && dx * dx + dy * dy < 900 * 900)
++                    printf("near: type %d doomednum %d state %d tics %d flags %08x dx %d dy %d\n", (int)m->type, mobj_info(m)->doomednum,
++                           (int)mobj_state_num(m), (int)m->tics, (unsigned)m->flags, dx, dy);
++            }
++    }
++    printf("thinkers %d gametic %d leveltime %d paused %d\n", n, gametic, leveltime, (int)paused);
++    return n;
++}
++
++// move the player (test only): Module._fm1_web_warp(x, y) in map units
++int fm1_web_warp(int x, int y) { return gamestate == GS_LEVEL && players[0].mo ? P_TeleportMove(players[0].mo, x << 16, y << 16) : -1; }
++// how many monsters have left their idle states, and the player's health
++int fm1_web_awake(void)
++{
++    int awake = 0;
++    if (gamestate != GS_LEVEL)
++        return -1;
++    for (thinker_t *t = thinker_next(&thinkercap); t != &thinkercap; t = thinker_next(t))
++        if (t->function == ThinkF_P_MobjThinker && (((mobj_t *)t)->flags & MF_COUNTKILL)) {
++            int st = (int)mobj_state_num((mobj_t *)t), sp = mobj_info((mobj_t *)t)->spawnstate;
++            awake += st != sp && st != sp + 1;
++        }
++    return awake * 1000 + players[0].health;
++}

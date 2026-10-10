@@ -1,0 +1,229 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Wed, 7 Oct 2026 23:51:23 -0700
+Subject: [PATCH 05/11] FM-1: device build support (constant short-pointer
+ base, device panic, C++ shims)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h              |  6 +++---
+ src/fm1/fm1_controls.c     |  2 +-
+ src/fm1/fm1_platform.c     |  6 +++++-
+ src/fm1/fm1_sdk.c          | 11 +++++++++++
+ src/fm1/fm1_web.c          |  8 ++++----
+ src/fm1/shim/cxx/algorithm |  6 ++++++
+ src/fm1/shim/cxx/atomic    |  2 ++
+ src/fm1/shim/cxx/cassert   |  1 +
+ src/fm1/shim/cxx/cstdint   |  1 +
+ src/fm1/shim/cxx/cstdio    |  1 +
+ src/fm1/shim/cxx/cstdlib   |  1 +
+ src/fm1/shim/cxx/cstring   |  1 +
+ src/fm1/shim/cxx/set       |  2 ++
+ 13 files changed, 39 insertions(+), 9 deletions(-)
+ create mode 100644 src/fm1/shim/cxx/algorithm
+ create mode 100644 src/fm1/shim/cxx/atomic
+ create mode 100644 src/fm1/shim/cxx/cassert
+ create mode 100644 src/fm1/shim/cxx/cstdint
+ create mode 100644 src/fm1/shim/cxx/cstdio
+ create mode 100644 src/fm1/shim/cxx/cstdlib
+ create mode 100644 src/fm1/shim/cxx/cstring
+ create mode 100644 src/fm1/shim/cxx/set
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index b139480..d5a45cd 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -12,12 +12,12 @@ uint32_t fm1_millis(void);
+ // encoders' steps since the last call (+ = clockwise)
+ enum { FM1_BTN_FX, FM1_BTN_SCL, FM1_BTN_ENV, FM1_BTN_LFO, FM1_BTN_EDIT, FM1_BTN_GLO, FM1_BTN_HOME, FM1_BTN_SAVE,
+        FM1_BTN_ARP, FM1_BTN_SEQ, FM1_BTN_PLAY, FM1_BTN_REC, FM1_BTN_OCTDN, FM1_BTN_OCTUP };
+-enum { FM1_ENC_SELECT, FM1_ENC_ALGO, FM1_ENC_PRESET, FM1_ENC_K1, FM1_ENC_K2, FM1_ENC_K3, FM1_ENC_K4, FM1_NENC };
+-void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NENC]);
++enum { FM1_ENC_SELECT, FM1_ENC_ALGO, FM1_ENC_PRESET, FM1_ENC_K1, FM1_ENC_K2, FM1_ENC_K3, FM1_ENC_K4, FM1_NKNOB };
++void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB]);
+ 
+ // fm1_controls.c: panel -> Doom keys
+ void fm1_controls_init(void);
+-void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NENC]);
++void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NKNOB]);
+ int fm1_next_key(int *doom_key, int *down);    // 1 and *doom_key / *down filled in, or 0 if none
+ // the game data (WHX) and the block the game heap lives in (it must end within 256 KB of the engine's
+ // short-pointed statics: see fm1_web_ram.c)
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 9473bfa..3f1ce29 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -55,7 +55,7 @@ void fm1_controls_init(void)
+     key_nextweapon = FM1_KEY_NEXTWEAPON;
+ }
+ 
+-void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NENC])
++void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NKNOB])
+ {
+     uint8_t want[256 / 8] = {0};
+     for (unsigned i = 0; i < FM1_NMAP; i++) {
+diff --git a/src/fm1/fm1_platform.c b/src/fm1/fm1_platform.c
+index 80fbf89..3b19fc2 100644
+--- a/src/fm1/fm1_platform.c
++++ b/src/fm1/fm1_platform.c
+@@ -26,7 +26,9 @@
+ #include "opl_internal.h"
+ #include "fm1.h"
+ 
++#if FM1_SHORTPTR_VAR
+ unsigned char *fm1_shortptr_base;
++#endif
+ extern const uint8_t *whd_map_base;
+ extern semaphore_t render_frame_ready, display_frame_freed;
+ void D_DoomMain(void);
+@@ -123,7 +125,7 @@ void I_GetEvent(void)
+ {
+     int key, down;
+     uint32_t notes, buttons;
+-    int8_t enc[FM1_NENC];
++    int8_t enc[FM1_NKNOB];
+     fm1_poll_panel(&notes, &buttons, enc);
+     fm1_controls_update(notes, buttons, enc);
+     while (fm1_next_key(&key, &down)) {
+@@ -142,11 +144,13 @@ void I_StopTextInput(void) {}
+ // ------------------------------------------------------------------ system
+ void I_Init(void)
+ {
++#if FM1_SHORTPTR_VAR
+     uint32_t n;
+     uint8_t *heap = fm1_heap(&n);
+     // short pointers reach 256 KB: the window ends where the heap ends and starts below it, so that it also
+     // covers the engine's statics placed just under the heap (short pointer 0 is NULL, hence the "- 4")
+     fm1_shortptr_base = heap + n - 0x40000 - 4;
++#endif
+     whd_map_base = fm1_whd_base();
+     fm1_controls_init();
+ }
+diff --git a/src/fm1/fm1_sdk.c b/src/fm1/fm1_sdk.c
+index 358c791..8efb176 100644
+--- a/src/fm1/fm1_sdk.c
++++ b/src/fm1/fm1_sdk.c
+@@ -6,6 +6,16 @@
+ #include <stdlib.h>
+ #include "pico.h"
+ 
++#if FM1_DEVICE
++extern void fm1_dev_panic(void);         // firmware/doom_dev.c: magenta screen, then reset
++void __attribute__((noreturn)) panic(const char *fmt, ...)
++{
++    (void)fmt;
++    fm1_dev_panic();
++    for (;;)
++        ;
++}
++#else
+ void __attribute__((noreturn)) panic(const char *fmt, ...)
+ {
+     va_list ap;
+@@ -15,6 +25,7 @@ void __attribute__((noreturn)) panic(const char *fmt, ...)
+     puts("");
+     abort();
+ }
++#endif
+ void __attribute__((noreturn)) panic_unsupported(void) { panic("unsupported"); }
+ void hard_assertion_failure(void) { panic("hard assert"); }
+ void __breakpoint(void) { panic("I_Error / breakpoint"); }
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 4f4faaf..2506213 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -11,7 +11,7 @@
+ 
+ static uint16_t fm1_lcd[240 * 240];
+ static uint32_t fm1_notes, fm1_buttons;
+-static int fm1_enc[FM1_NENC];
++static int fm1_enc[FM1_NKNOB];
+ 
+ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px)
+ {
+@@ -19,11 +19,11 @@ void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t
+         memcpy(&fm1_lcd[(y + r) * 240u + x], px + r * w, (x + w <= 240u ? w : 240u - x) * 2u);
+ }
+ uint32_t fm1_millis(void) { return (uint32_t)emscripten_get_now(); }
+-void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NENC])
++void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB])
+ {
+     *notes = fm1_notes;
+     *buttons = fm1_buttons;
+-    for (int i = 0; i < FM1_NENC; i++) {
++    for (int i = 0; i < FM1_NKNOB; i++) {
+         enc[i] = (int8_t)fm1_enc[i];
+         fm1_enc[i] = 0;
+     }
+@@ -31,7 +31,7 @@ void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NENC])
+ const uint8_t *fm1_whd_base(void) { return tiny_whd; }
+ 
+ EMSCRIPTEN_KEEPALIVE void fm1_web_panel(uint32_t notes, uint32_t buttons) { fm1_notes = notes; fm1_buttons = buttons; }
+-EMSCRIPTEN_KEEPALIVE void fm1_web_enc(int i, int steps) { if (i >= 0 && i < FM1_NENC) fm1_enc[i] += steps; }
++EMSCRIPTEN_KEEPALIVE void fm1_web_enc(int i, int steps) { if (i >= 0 && i < FM1_NKNOB) fm1_enc[i] += steps; }
+ EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_underruns(void) { return fm1_audio_underruns; }
+ EMSCRIPTEN_KEEPALIVE uint16_t *fm1_web_lcd(void) { return fm1_lcd; }
+ EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_frames(void) { return fm1_frames; }
+diff --git a/src/fm1/shim/cxx/algorithm b/src/fm1/shim/cxx/algorithm
+new file mode 100644
+index 0000000..876cace
+--- /dev/null
++++ b/src/fm1/shim/cxx/algorithm
+@@ -0,0 +1,6 @@
++#pragma once
++namespace std {
++template <class T> inline const T &min(const T &a, const T &b) { return b < a ? b : a; }
++template <class T> inline const T &max(const T &a, const T &b) { return a < b ? b : a; }
++template <class T> inline void swap(T &a, T &b) { T t = a; a = b; b = t; }
++}
+diff --git a/src/fm1/shim/cxx/atomic b/src/fm1/shim/cxx/atomic
+new file mode 100644
+index 0000000..8442176
+--- /dev/null
++++ b/src/fm1/shim/cxx/atomic
+@@ -0,0 +1,2 @@
++#pragma once
++namespace std { enum memory_order { memory_order_acquire, memory_order_release }; inline void atomic_thread_fence(memory_order) {} }
+diff --git a/src/fm1/shim/cxx/cassert b/src/fm1/shim/cxx/cassert
+new file mode 100644
+index 0000000..f5711e7
+--- /dev/null
++++ b/src/fm1/shim/cxx/cassert
+@@ -0,0 +1 @@
++#include <assert.h>
+diff --git a/src/fm1/shim/cxx/cstdint b/src/fm1/shim/cxx/cstdint
+new file mode 100644
+index 0000000..9a6118b
+--- /dev/null
++++ b/src/fm1/shim/cxx/cstdint
+@@ -0,0 +1 @@
++#include <stdint.h>
+diff --git a/src/fm1/shim/cxx/cstdio b/src/fm1/shim/cxx/cstdio
+new file mode 100644
+index 0000000..53c5fdf
+--- /dev/null
++++ b/src/fm1/shim/cxx/cstdio
+@@ -0,0 +1 @@
++#include <stdio.h>
+diff --git a/src/fm1/shim/cxx/cstdlib b/src/fm1/shim/cxx/cstdlib
+new file mode 100644
+index 0000000..c8b49f2
+--- /dev/null
++++ b/src/fm1/shim/cxx/cstdlib
+@@ -0,0 +1 @@
++#include <stdlib.h>
+diff --git a/src/fm1/shim/cxx/cstring b/src/fm1/shim/cxx/cstring
+new file mode 100644
+index 0000000..3b2f590
+--- /dev/null
++++ b/src/fm1/shim/cxx/cstring
+@@ -0,0 +1 @@
++#include <string.h>
+diff --git a/src/fm1/shim/cxx/set b/src/fm1/shim/cxx/set
+new file mode 100644
+index 0000000..e42db73
+--- /dev/null
++++ b/src/fm1/shim/cxx/set
+@@ -0,0 +1,2 @@
++#pragma once
++namespace std { template <class T> struct set { void insert(const T &) {} unsigned size() const { return 0; } }; }
