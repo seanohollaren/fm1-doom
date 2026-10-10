@@ -9,6 +9,7 @@
 <canvas id="lcd" width="240" height="240" tabindex="0"></canvas>
 <p>PC key &rarr; FM-1 control: arrows &rarr; G#3 G3 A3 B3 (move / turn) &middot; , . &rarr; F3 C4 (strafe) &middot; Shift &rarr; F#3 (run)<br>
 Ctrl or F &rarr; F5 / E5 (fire) &middot; Space &rarr; G5 (use) &middot; Enter &rarr; PLAY &middot; Esc &rarr; HOME (menu) &middot; [ ] &rarr; OCT- OCT+ (weapon) &middot; - = &rarr; SELECT knob<br>
+1 2 &rarr; KNOB 1 (filter: low-pass / off / high-pass) &middot; 3 4 &rarr; KNOB 2 (resonance) &middot; E &rarr; EDIT (filter off)<br>
 <span id="fps"></span></p>
 <script>
   // PC key -> FM-1 panel element. n: note key (0 = F3 .. 26 = G5), b: button by printed label, e: [encoder, steps].
@@ -17,7 +18,8 @@ Ctrl or F &rarr; F5 / E5 (fire) &middot; Space &rarr; G5 (use) &middot; Enter &r
   const PANEL = { ArrowUp: {n: 3}, ArrowLeft: {n: 2}, ArrowDown: {n: 4}, ArrowRight: {n: 6}, Comma: {n: 0}, Period: {n: 7},
                   ShiftLeft: {n: 1}, ShiftRight: {n: 25}, ControlLeft: {n: 24}, ControlRight: {n: 24}, KeyF: {n: 23}, Space: {n: 26},
                   Escape: {b: BTN.HOME}, Enter: {b: BTN.PLAY}, KeyR: {b: BTN.REC}, BracketLeft: {b: BTN.OCTDN}, BracketRight: {b: BTN.OCTUP},
-                  KeyY: {b: BTN.FX}, KeyV: {b: BTN.SCL}, KeyL: {b: BTN.LFO}, KeyP: {b: BTN.ENV}, Minus: {e: [0, -1]}, Equal: {e: [0, 1]}, Digit9: {e: [6, -1]}, Digit0: {e: [6, 1]} };
+                  KeyY: {b: BTN.FX}, KeyV: {b: BTN.SCL}, KeyL: {b: BTN.LFO}, KeyP: {b: BTN.ENV}, Minus: {e: [0, -1]}, Equal: {e: [0, 1]}, Digit9: {e: [6, -1]}, Digit0: {e: [6, 1]},
+                  Digit1: {e: [3, -1]}, Digit2: {e: [3, 1]}, Digit3: {e: [4, -1]}, Digit4: {e: [4, 1]}, KeyE: {b: BTN.EDIT} };   // the filter: KNOB 1, KNOB 2, EDIT
   var Module = {
     onRuntimeInitialized() {
       const ctx = document.getElementById('lcd').getContext('2d'), img = ctx.createImageData(240, 240);

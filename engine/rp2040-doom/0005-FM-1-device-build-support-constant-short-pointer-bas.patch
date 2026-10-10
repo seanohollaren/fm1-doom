@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Wed, 7 Oct 2026 23:51:23 -0700
-Subject: [PATCH 05/11] FM-1: device build support (constant short-pointer
+Subject: [PATCH 05/12] FM-1: device build support (constant short-pointer
  base, device panic, C++ shims)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

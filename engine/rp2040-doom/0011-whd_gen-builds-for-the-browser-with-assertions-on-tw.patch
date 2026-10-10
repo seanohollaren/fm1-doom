@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Fri, 9 Oct 2026 19:07:18 -0700
-Subject: [PATCH 11/11] whd_gen: builds for the browser with assertions on; two
+Subject: [PATCH 11/12] whd_gen: builds for the browser with assertions on; two
  fixes found with Freedoom
 
 - config.h: LOOKAHEAD can be set from the command line, so a build with assertions

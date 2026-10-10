@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Fri, 9 Oct 2026 17:37:54 -0700
-Subject: [PATCH 10/11] FM-1: the picture starts on the whole panel
+Subject: [PATCH 10/12] FM-1: the picture starts on the whole panel
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

@@ -32,5 +32,7 @@ $CC -Wextra -o $T/data_test firmware/tests/data_test.c            # the second d
 run "data block 2 over USB: firmware/dev_data.h against a simulated flash and host" $T/data_test
 $CC -Wextra -o $T/volume_test firmware/tests/volume_test.c        # the MASTER knob as the game's volume
 run "volume: firmware/dev_volume.h" $T/volume_test
+$CC -Wextra -I rp2040-doom/src/fm1 -o $T/filter_test firmware/tests/filter_test.c -lm   # the filter on KNOB 1 / KNOB 2
+run "filter: rp2040-doom/src/fm1/fm1_filter.h" $T/filter_test
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

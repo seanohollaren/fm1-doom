@@ -1,0 +1,240 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Fri, 9 Oct 2026 23:41:40 -0700
+Subject: [PATCH 12/12] FM-1: a filter over the game's sound on KNOB 1 (sweep)
+ and KNOB 2 (resonance), EDIT turns it off
+
+fm1_filter.h is a trapezoidal state-variable filter in fixed point: left of centre a low-pass
+closing from 8 kHz to 80 Hz, right of centre a high-pass opening the same way, the centre off
+(samples untouched). Settings are ramped across a block and off/on is a crossfade. fm1_controls.c
+owns the two settings and says them on the message line; the browser build runs the filter in
+its audio callback, the device in its audio interrupt.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |   3 +
+ src/fm1/fm1_controls.c |  26 +++++++++
+ src/fm1/fm1_filter.h   | 122 +++++++++++++++++++++++++++++++++++++++++
+ src/fm1/fm1_web.c      |   3 +
+ 4 files changed, 154 insertions(+)
+ create mode 100644 src/fm1/fm1_filter.h
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index a6f4e6b..fbbd432 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -18,6 +18,9 @@ enum { FM1_ENC_SELECT, FM1_ENC_ALGO, FM1_ENC_PRESET, FM1_ENC_K1, FM1_ENC_K2, FM1
+ void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB]);
+ 
+ // fm1_controls.c: panel -> Doom keys
++// ... and the two settings of the filter over the game's sound (fm1_filter.h): KNOB 1 sweeps it, KNOB 2 sets the
++// resonance, EDIT turns it off. Whatever plays the sound reads them and runs the filter.
++extern volatile int8_t fm1_filter_pos, fm1_filter_res;
+ void fm1_controls_init(void);
+ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NKNOB]);
+ int fm1_next_key(int *doom_key, int *down);    // 1 and *doom_key / *down filled in, or 0 if none
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index ee28747..fe3143e 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -10,6 +10,9 @@
+ //             SCL next picture shape   LFO next screen link speed   ENV show the frame rate
+ //             (the last three answer with a line on the game's message display, so only while a level is up)
+ //   knobs:    SELECT moves through menus (weapons while playing)   KNOB 4 previous / next weapon
++//   the synth's own trick, a filter over everything the game plays (fm1_filter.h):
++//             KNOB 1 sweeps it: left of centre a low-pass closing down, right of centre a high-pass opening up
++//             KNOB 2 resonance   EDIT off
+ //
+ #include "doomkeys.h"
+ #include "doomtype.h"
+@@ -17,6 +20,9 @@
+ extern boolean menuactive;                                   /* doom/m_menu.c */
+ #include "doomstat.h"
+ #include "fm1.h"
++#include "fm1_filter.h"
++
++volatile int8_t fm1_filter_pos, fm1_filter_res = FM1_FILTER_RES_DEFAULT;
+ 
+ static char fm1_msg[40];
+ static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n < 0: no number) on the HUD */
+@@ -114,6 +120,26 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+             fm1_down[k >> 3] ^= (uint8_t)m;
+         }
+     }
++    // the filter: KNOB 1 sweeps, and stops at the centre (off) on its way across; KNOB 2 resonance; EDIT off
++    if (enc[FM1_ENC_K1] || (pressed & (1u << FM1_BTN_EDIT))) {
++        int old = fm1_filter_pos, pos = old + enc[FM1_ENC_K1];
++        if ((pressed & (1u << FM1_BTN_EDIT)) || (old < 0 && pos > 0) || (old > 0 && pos < 0))
++            pos = 0;
++        if (pos < -FM1_FILTER_STEPS) pos = -FM1_FILTER_STEPS;
++        if (pos > FM1_FILTER_STEPS) pos = FM1_FILTER_STEPS;
++        fm1_filter_pos = (int8_t)pos;
++        if (!pos)
++            fm1_say("FILTER OFF", -1, "");
++        else
++            fm1_say(pos < 0 ? "LOW PASS " : "HIGH PASS ", FM1_FILTER_HZ[fm1_filter_step(pos)], " HZ");
++    }
++    if (enc[FM1_ENC_K2]) {
++        int res = fm1_filter_res + enc[FM1_ENC_K2];
++        if (res < 0) res = 0;
++        if (res >= FM1_FILTER_RES) res = FM1_FILTER_RES - 1;
++        fm1_filter_res = (int8_t)res;
++        fm1_say("RESONANCE ", res, "");
++    }
+     int sel = enc[FM1_ENC_SELECT], k4 = enc[FM1_ENC_K4];
+     if (menuactive) {
+         fm1_tap(sel > 0 ? KEY_DOWNARROW : KEY_UPARROW, sel > 0 ? sel : -sel);
+diff --git a/src/fm1/fm1_filter.h b/src/fm1/fm1_filter.h
+new file mode 100644
+index 0000000..0f19c80
+--- /dev/null
++++ b/src/fm1/fm1_filter.h
+@@ -0,0 +1,122 @@
++// FM-1: a filter over everything the game plays. The FM-1 is a synthesizer, after all.
++//
++// One knob sweeps it: at the centre it is off (the sound is not touched at all); turned left it is a low-pass
++// that closes down from 8000 Hz to 80 Hz; turned right, a high-pass that opens up from 80 Hz to 8000 Hz.
++// A second knob sets the resonance, the peak at the cutoff. fm1_controls.c owns the two settings
++// (fm1_filter_pos, fm1_filter_res); whatever plays the sound (the device's audio interrupt, the browser build)
++// calls fm1_filter_run on each block of 16-bit stereo before it goes out.
++//
++// The filter is a state-variable filter in its trapezoidal form (Zavalishin; Simper's "SvfLinearTrapOptimised2"):
++// stable at every cutoff and resonance, and well behaved while the cutoff moves. Arithmetic is fixed point with
++// 64-bit products (one instruction on the FM-1's CPU): coefficients in Q24, samples carried with 8 extra bits.
++// Changes of setting are ramped across one block, and off <-> on is a crossfade, so nothing clicks.
++// firmware/tests/filter_test.c in the fm1-doom repository tests it on a PC.
++//
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++#include <stdint.h>
++
++#define FM1_FILTER_STEPS 40             // knob positions each side of off: -40 .. -1 low-pass, 0 off, 1 .. 40 high-pass
++#define FM1_FILTER_RES 8                // resonance settings 0 .. 7
++#define FM1_FILTER_RES_DEFAULT 3
++
++// tan(pi * f / 44118) in Q24 for the 40 cutoffs, 80 Hz to 8000 Hz in equal ratios, and the same in Hz for showing
++static const int32_t FM1_FILTER_G[FM1_FILTER_STEPS] = {
++       95576,   107555,   121036,   136207,   153280,   172492,   194113,   218445,
++      245828,   276644,   311325,   350356,   394283,   443723,   499368,   562001,
++      632503,   711868,   801218,   901822,  1015112,  1142713,  1286465,  1448461,
++     1631082,  1837054,  2069501,  2332025,  2628805,  2964722,  3345531,  3778090,
++     4270675,  4833431,  5479020,  6223574,  7088157,  8101049,  9301466, 10745880
++};
++static const uint16_t FM1_FILTER_HZ[FM1_FILTER_STEPS] __attribute__((unused)) = {
++      80,   90,  100,  115,  130,  145,  160,  185,  205,  230,
++     260,  295,  330,  370,  420,  470,  530,  595,  670,  755,
++     850,  955, 1070, 1210, 1360, 1530, 1720, 1940, 2180, 2460,
++    2760, 3110, 3500, 3940, 4430, 4990, 5610, 6320, 7110, 8000
++};
++// 1 / Q in Q24, for Q = 0.7071, 1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0
++static const int32_t FM1_FILTER_K[FM1_FILTER_RES] = {
++    23726794, 16777216, 11983726,  8388608,  5991863,  4194304,  2995931,  2097152
++};
++
++typedef struct {
++    int32_t ic1[2], ic2[2];             // the two integrators of each channel (samples << 8)
++    int32_t c[5];                       // coefficients in use: a1, a2, a3, k, output level (Q24)
++    int32_t t[5];                       // ... and where they are heading
++    int32_t wet, twet;                  // 0 = the sound as it came, 256 = all filter
++    int8_t pos, res, high, set;         // the settings c[] was made for; high: 1 = high-pass, 0 = low-pass
++} fm1_filter_t;
++
++// which cutoff a knob position means (index into the tables)
++static inline int fm1_filter_step(int pos) { return pos < 0 ? FM1_FILTER_STEPS + pos : pos - 1; }
++
++static inline int32_t fm1_filter_mul(int32_t c, int32_t v) { return (int32_t)(((int64_t)c * v) >> 24); }
++static inline int32_t fm1_filter_sat(int64_t v)
++{
++    const int32_t top = 1 << 29;        // far above anything music does: a guard, not a limiter
++    return v > top ? top : v < -top ? -top : (int32_t)v;
++}
++
++// One block of interleaved stereo, in place. pos: -FM1_FILTER_STEPS .. FM1_FILTER_STEPS; res: 0 .. FM1_FILTER_RES - 1.
++// Off (pos 0, once any fade has finished) returns without touching a sample.
++static void fm1_filter_run(fm1_filter_t *f, int16_t *buf, uint32_t frames, int pos, int res)
++{
++    uint32_t i, n;
++    int32_t d[5], dw;
++    if (!frames)
++        return;
++    if (pos < -FM1_FILTER_STEPS) pos = -FM1_FILTER_STEPS;
++    if (pos > FM1_FILTER_STEPS) pos = FM1_FILTER_STEPS;
++    if (res < 0) res = 0;
++    if (res >= FM1_FILTER_RES) res = FM1_FILTER_RES - 1;
++    if (!f->set || pos != f->pos || res != f->res) {
++        if (pos) {
++            const int64_t one = (int64_t)1 << 24;
++            int32_t g = FM1_FILTER_G[fm1_filter_step(pos)], k = FM1_FILTER_K[res];
++            int32_t a1 = (int32_t)((one << 24) / (one + (((int64_t)g * (g + k)) >> 24)));
++            int32_t level = (1 << 23) + k / 2;      // quieter as the resonance rises, so its peak has somewhere to go
++            f->t[0] = a1;
++            f->t[1] = fm1_filter_mul(g, a1);
++            f->t[2] = fm1_filter_mul(g, f->t[1]);
++            f->t[3] = k;
++            f->t[4] = level > (1 << 24) ? 1 << 24 : level;
++            if (!f->wet) {                          // coming on from off: start at the new settings, with empty integrators
++                for (i = 0; i < 5; i++) f->c[i] = f->t[i];
++                f->ic1[0] = f->ic1[1] = f->ic2[0] = f->ic2[1] = 0;
++            }
++            f->high = pos > 0;
++            f->twet = 256;
++        } else
++            f->twet = 0;                            // going off: fade out with the filter as it is
++        f->pos = (int8_t)pos;
++        f->res = (int8_t)res;
++        f->set = 1;
++    }
++    if (!f->wet && !f->twet)
++        return;
++    for (i = 0; i < 5; i++)
++        d[i] = (f->t[i] - f->c[i]) / (int32_t)frames;
++    dw = ((f->twet - f->wet) << 16) / (int32_t)frames;
++    {
++        int32_t c0 = f->c[0], c1 = f->c[1], c2 = f->c[2], c3 = f->c[3], c4 = f->c[4], w = f->wet << 16;
++        int high = f->high;
++        for (n = 0; n < frames; n++) {
++            c0 += d[0]; c1 += d[1]; c2 += d[2]; c3 += d[3]; c4 += d[4]; w += dw;
++            for (i = 0; i < 2u; i++) {
++                int32_t x = (int32_t)buf[2u * n + i] << 8;
++                int32_t v3 = x - f->ic2[i];
++                int32_t v1 = fm1_filter_mul(c0, f->ic1[i]) + fm1_filter_mul(c1, v3);
++                int32_t v2 = f->ic2[i] + fm1_filter_mul(c1, f->ic1[i]) + fm1_filter_mul(c2, v3);
++                int32_t y, o;
++                f->ic1[i] = fm1_filter_sat(2 * (int64_t)v1 - f->ic1[i]);
++                f->ic2[i] = fm1_filter_sat(2 * (int64_t)v2 - f->ic2[i]);
++                y = fm1_filter_mul(c4, high ? x - fm1_filter_mul(c3, v1) - v2 : v2);
++                o = (x + (int32_t)(((int64_t)(y - x) * (w >> 16)) >> 8) + 128) >> 8;
++                buf[2u * n + i] = (int16_t)(o > 32767 ? 32767 : o < -32768 ? -32768 : o);
++            }
++        }
++    }
++    for (i = 0; i < 5; i++)
++        f->c[i] = f->t[i];
++    f->wet = f->twet;
++}
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 739c2bc..a8ed35e 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -7,6 +7,7 @@
+ #include <stdint.h>
+ #include <string.h>
+ #include "fm1.h"
++#include "fm1_filter.h"
+ #include "../tiny.whd.h"
+ 
+ static uint16_t fm1_lcd[240 * 240];
+@@ -69,11 +70,13 @@ EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_frames(void) { return fm1_frames; }
+ 
+ // the page's audio callback: frames of 16-bit stereo at the AudioContext's rate
+ static int16_t fm1_web_pcm[4096 * 2];
++static fm1_filter_t fm1_web_filter;
+ EMSCRIPTEN_KEEPALIVE int16_t *fm1_web_audio(int frames, int rate)
+ {
+     if (frames > 4096)
+         frames = 4096;
+     fm1_audio_read(fm1_web_pcm, (uint32_t)frames, (uint32_t)rate);
++    fm1_filter_run(&fm1_web_filter, fm1_web_pcm, (uint32_t)frames, fm1_filter_pos, fm1_filter_res);   // tuned for 44.1 kHz
+     return fm1_web_pcm;
+ }
+ 

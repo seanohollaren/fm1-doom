@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Wed, 7 Oct 2026 23:44:31 -0700
-Subject: [PATCH 04/11] FM-1: sound, panel controls, one-level menus
+Subject: [PATCH 04/12] FM-1: sound, panel controls, one-level menus
 
 Audio: the stock mixer and OPL music run unchanged on a ring buffer
 (fm1_audio.c) that the output side reads with resampling. Controls:
