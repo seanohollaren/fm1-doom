@@ -3,6 +3,7 @@
 # Run with admin credentials and a logged-in gh:   ./scripts/setup-github-oidc.sh
 # Safe to run again: it updates the trust policy and the permissions in place.
 set -euo pipefail
+export AWS_PAGER=""   # no pager: the CLI would stop in `less` after creating the role and wait for a key
 
 ACCOUNT_ID="514220683169"
 ROLE_NAME="github-actions-deploy-fm1-doom"
