@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Footer, Header, Hero } from './components/Chrome'
+import { Footer, Hero } from './components/Chrome'
 import { DevicePanel } from './components/DevicePanel'
 import { Manual } from './components/Manual'
 import { Stepper } from './components/Stepper'
@@ -32,7 +32,6 @@ export default function App() {
 
   return (
     <>
-      <Header />
       <main>
         <div className="shell stage">
           <Hero />

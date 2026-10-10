@@ -16,7 +16,6 @@ export const site = {
   /** where a visitor can read about the shareware game file */
   wadHelpUrl: 'https://doomwiki.org/wiki/DOOM1.WAD',
   feluccaInstallerUrl: 'https://hugelton.github.io/Felucca/',
-  publisher: 'Deadlock Interactive',
   /** what a player should know about the build the page installs; edit with every firmware release */
   buildNotes: [
     'One level: E1M1. Finishing it returns to the title picture.',

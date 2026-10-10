@@ -2,33 +2,11 @@ import { firmware } from '../lib/prepare'
 import { site } from '../site'
 
 const hex = (n: number) => n.toString(16).padStart(8, '0')
-const kb = (n: number) => Math.round(n / 1024)
-
-export function Header() {
-  return (
-    <header className="top">
-      <div className="shell top__row">
-        <span className="top__mark">{site.publisher}</span>
-        <nav className="top__nav" aria-label="On this page">
-          <a href="#install">Install</a>
-          <a href="#controls">Controls</a>
-          <a href="#screens">Screens</a>
-          <a href="#back">Going back</a>
-          {site.sourceUrl && (
-            <a href={site.sourceUrl} target="_blank" rel="noopener noreferrer">
-              Source
-            </a>
-          )}
-        </nav>
-      </div>
-    </header>
-  )
-}
 
 export function Hero() {
   return (
     <div className="hero">
-      <p className="label hero__eyebrow">Experimental firmware for the M‑VAVE FM‑1</p>
+      <p className="label hero__eyebrow">Experimental firmware</p>
       <h1 className="display hero__title">
         <span>Doom</span>{' '}
         <span>
@@ -36,27 +14,8 @@ export function Hero() {
         </span>
       </h1>
       <p className="hero__lede">
-        The first level of Doom on a pocket synthesizer: its own screen, its own keys, its own speaker. It installs from this page over
-        USB.
+        The first level of Doom, complete with music and sound and some filters for fun. Flashable from the browser.
       </p>
-      <dl className="specs">
-        <div>
-          <dt className="label">Memory chip</dt>
-          <dd className="display">1 MB</dd>
-        </div>
-        <div>
-          <dt className="label">Working memory</dt>
-          <dd className="display">512 KB</dd>
-        </div>
-        <div>
-          <dt className="label">Screen</dt>
-          <dd className="display">240 × 240</dd>
-        </div>
-        <div>
-          <dt className="label">Engine</dt>
-          <dd className="display">{kb(firmware.img_len)} KB</dd>
-        </div>
-      </dl>
     </div>
   )
 }
