@@ -1468,3 +1468,40 @@ Sean asked for both: a name that is not Felucca's, and the real volume knob.
 - NOT VERIFIED until it runs on the FM-1: that the knob's direction and range feel right (the mapping is
   Felucca's, so it should match the synth), that full volume does not distort on the speaker, and how the Mac
   names the MIDI port after the change (it may keep showing the old name for a while).
+
+## 2026-10-09 ~23:30 — Build "b7": a filter over the game's sound on two knobs (built and Mac-tested; NOT installed)
+
+Sean's idea: this is a synthesizer, so let a knob filter the game's sound while it plays. A party trick.
+
+- **What it is.** KNOB 1 sweeps: left of centre a low-pass closing from 8 kHz down to 80 Hz, right of centre a
+  high-pass opening from 80 Hz up to 8 kHz, 40 steps each side in equal ratios, the centre off. Crossing the
+  centre stops at off (one more click continues). KNOB 2 is the resonance, 8 settings (Q 0.7 to 8), starting at
+  3. EDIT turns the filter off. Each change is said on the game's message line (only while a level is up).
+- **Where.** `rp2040-doom/src/fm1/fm1_filter.h` (engine patch 0012): a state-variable filter in its trapezoidal
+  form, stable at every setting, fixed point with 64-bit products. `fm1_controls.c` owns the two settings; the
+  device's audio interrupt (`doom_dev.c`) and the browser build's audio callback run it on each block, before
+  the volume. Off returns without touching a sample, so with the knob at the centre the sound path is b6's.
+- VERIFIED in the b6 disassembly first: the CPU multiplies 32x32 into 64 bits in one instruction
+  (`r1_r0 = r1 * r0 (s)`, as the engine's own FixedMul compiles), so 64-bit fixed point costs nothing special.
+- **Cost** (from the b7 disassembly): at most 73 instructions per sample of one channel, 6.4 million a second
+  while the filter is on, none while it is off. The first version of the loop (64-bit saturation, both channels
+  in one loop) was 120 and was rewritten. The CPU's clock is still unknown, so what that costs in frame rate is
+  for the device to say: ENV shows the rate with the filter off and on.
+- **Tests.** `firmware/tests/filter_test.c` (21 checks): the cutoff sits where the table says along the whole
+  knob (-3 dB there within 0.35 dB), resonance peaks as computed (13.1 dB at the top setting, both sides), off
+  is bit-exact, full-scale square noise at top resonance with the knob jumping about cannot push the state to
+  its guard, silence in gives silence out, turning through off under a steady tone makes no click, channels are
+  separate. `web/test_filter.js`: in the browser build with the level's music playing, low-pass cuts the top of
+  the sound to 1/60, high-pass the bottom to 1/180, EDIT restores it, no audio underruns. The headless gameplay
+  test is unchanged (2 awake, health 25 at t = 13).
+- b7 = b6 + the filter: firmware 268,428 B, recovery core id `3366af9307ab58fe`, build id `80d062fa`;
+  `doom_part1.fwsc` SHA-256 `2ab6deb5…df741f75b`, `doom_code.fwsc` `ef16ba8d…d8c6405c`; data block 2 unchanged.
+  18 package runs pass; predicted flash passes `check_dump.py`. Symbols: `firmware/installed_2ab6deb5/`
+  (b6's packages are kept in `firmware/installed_b2ed37e8/`). Source commit `7dcc819`.
+- The engine patch series is now written without "[PATCH n/m]" in the subjects, so adding a patch no longer
+  rewrites the earlier files. VERIFIED again: the series on upstream `29a453c` gives the local branch's tree.
+- NOT VERIFIED until it runs on the FM-1: how it sounds on the speaker (the bottom half of the low-pass may leave
+  little a small speaker can play), how many clicks of the knob a sweep takes, whether KNOB 1 and KNOB 2 are the
+  encoders the HAL's numbering says, and the frame rate with the filter on.
+- Local test pages (production builds, static): b6 on port 5183 (`dist-b6`), b7 on port 5184 (`dist-b7`). The
+  site in the pull request still serves b5; the working tree holds b7 and its page text, uncommitted.
