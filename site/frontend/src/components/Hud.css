@@ -1,0 +1,100 @@
+.hud {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.hud__cells {
+  display: grid;
+  grid-template-columns: 0.7fr 1.15fr 1.15fr 0.7fr;
+}
+
+.hud__cell {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  padding: 1.15rem 0.5rem 0.85rem;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+.hud__cell:first-child {
+  border-left: 0;
+}
+
+.hud__cell.is-now {
+  background: linear-gradient(var(--red-wash), transparent);
+}
+
+.hud__value {
+  display: grid;
+  place-items: center;
+  height: 2.6rem;
+}
+
+.pixel {
+  display: block;
+  height: 2.1rem;
+  width: auto;
+  max-width: 100%;
+}
+
+.pixel__ink {
+  fill: var(--red-hot);
+}
+
+.pixel--green .pixel__ink {
+  fill: var(--green);
+}
+
+.pixel--dim .pixel__ink {
+  fill: var(--line-strong);
+}
+
+.pixel--amber .pixel__ink {
+  fill: var(--amber);
+}
+
+.hud__cell.is-now .hud__name,
+.hud__cell.is-done .hud__name {
+  color: var(--ink-soft);
+}
+
+.hud__note {
+  min-height: 1em;
+  font: 400 0.72rem/1 var(--font-mono);
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+.hud__track {
+  height: 5px;
+  background: var(--line);
+}
+
+.hud__fill {
+  height: 100%;
+  background: var(--red);
+  transition: width 0.3s linear;
+}
+
+.hud__fill.is-done {
+  background: var(--green);
+}
+
+.hud__fill.is-failed {
+  background: var(--amber);
+}
+
+@media (max-width: 34rem) {
+  .hud__cells {
+    grid-template-columns: 1fr 1fr;
+  }
+  .hud__cell:nth-child(3) {
+    border-left: 0;
+  }
+  .hud__cell:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+}

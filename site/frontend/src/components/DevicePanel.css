@@ -1,0 +1,34 @@
+.devpanel {
+  grid-area: device;
+  position: sticky;
+  top: 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+  margin-top: clamp(2.5rem, 6vw, 4.5rem);
+}
+
+.devpanel__says {
+  display: grid;
+  gap: 0.3rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--red);
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+  min-height: 3.6rem;
+}
+
+@media (max-width: 60rem) {
+  .devpanel {
+    position: static;
+    grid-template-columns: minmax(0, 17rem) 1fr;
+    align-items: center;
+    gap: 1.5rem;
+    margin: 0 0 2rem;
+  }
+}
+
+@media (max-width: 34rem) {
+  .devpanel {
+    grid-template-columns: 1fr;
+  }
+}

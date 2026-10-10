@@ -1,0 +1,12 @@
+{
+  "version": "b5",
+  "file": "firmware/doom-b5.fwsc",
+  "sha256": "ade8f712536b087fb3d311a9fdc8a4ccdaea59ca8d340d118a8e1df3e3196f3f",
+  "product": "FM-1_666",
+  "build": 2587125160,
+  "core": "97147e870713a75f",
+  "img_len": 266808,
+  "desc_at": 266848,
+  "app_slot": 581564,
+  "converter_sha256": "b625a72ac18ef6aafa949c8746e86a38df65f050566972da3149388d79c3a3cf"
+}

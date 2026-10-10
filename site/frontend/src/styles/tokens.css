@@ -1,0 +1,78 @@
+/* Every colour, face and measure the page uses. Component styles refer to these only (npm run check:tokens). */
+:root {
+  color-scheme: dark;
+
+  /* ground: charred, a little warm */
+  --bg: #0b0a09;
+  --bg-raised: #131110;
+  --bg-panel: #171413;
+  --bg-inset: #0e0c0b;
+  --line: #2b2623;
+  --line-strong: #40382f;
+
+  /* ink */
+  --ink: #ece5d9;
+  --ink-soft: #b0a698;
+  --ink-faint: #877d70;
+
+  /* signal */
+  --red: #d4331c;
+  --red-hot: #f25a36;
+  --red-wash: rgba(212, 51, 28, 0.1);
+  --amber: #e2a43c;
+  --amber-wash: rgba(226, 164, 60, 0.1);
+  --green: #79b85c;
+  --green-wash: rgba(121, 184, 92, 0.1);
+  --on-red: #fff6ef;
+
+  /* the FM-1 in the drawing */
+  --dv-case: #2b2826;
+  --dv-case-edge: #3c3835;
+  --dv-well: #231f1d;
+  --dv-key: #3d3835;
+  --dv-key-edge: #4c4642;
+  --dv-btn: #1d1b1a;
+  --dv-btn-text: #8e867b;
+  --dv-knob: #1a1817;
+  --dv-knob-cap: #57514b;
+  --dv-bezel: #050505;
+  --dv-shadow: rgba(0, 0, 0, 0.55);
+
+  /* what the controls do (the drawing and its list share these) */
+  --g-move: #ece5d9;
+  --g-side: #8fb1c9;
+  --g-fire: #e2452c;
+  --g-use: #e2a43c;
+  --g-weapon: #b98fd0;
+  --g-menu: #79b85c;
+  --g-view: #9a9186;
+  --on-group: #14110f;
+
+  /* the FM-1's own screen colours (firmware/doom_dev.c), for the small swatches */
+  --fw-blue: #000084;
+  --fw-cyan: #00ffff;
+  --fw-amber: #ffa600;
+  --fw-red: #ff0000;
+  --fw-magenta: #ff00ff;
+  --fw-white: #ffffff;
+  --fw-black: #000000;
+
+  /* the flash map */
+  --map-fixed: #4a433c;
+  --map-kept: #6f8a63;
+  --map-new: #d4331c;
+  --map-new-2: #a3271a;
+  --map-work: #8c6a2e;
+
+  --grain: rgba(255, 255, 255, 0.012);
+
+  --font-display: 'Big Shoulders Display', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius: 3px;
+  --radius-lg: 6px;
+  --shell: 74rem;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

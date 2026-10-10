@@ -1301,3 +1301,72 @@ Short answer: bring-your-own works and is built; Freedoom's levels do not fit.
 - The "about the file" link (Doom Wiki, DOOM1.WAD) could not be checked from here: the site answers a bot check.
 - A default that needs no file: Sean to choose between (a) the page fetching the unmodified shareware WAD
   from a public mirror in the visitor's browser, checked by SHA-256, (b) a made-to-fit free level, (c) as built.
+
+## 2026-10-09 ~20:30 — The hosted site: Vite + React, AWS set-up, a designed six-step install (built and tested on the Mac; NOT deployed, NOT run against the device)
+
+Sean's request: host the installer as a Vite + React site on AWS like `static-personal-site`, at
+`doom.deadlockinteractive.com` (domain newly transferred to Route 53), with a staged install in the manner of
+Baud Girl's page, "nice and Doom appropriate".
+
+### Structure (`site/`, described in `site/README.md`)
+- `site/frontend`: Vite 7 + React 19 + TypeScript, vitest. Fonts self-hosted through the build (Big Shoulders
+  Display, IBM Plex Sans / Mono, all OFL): the page makes no request to any other host.
+- `site/infra`: CDK copied from `static-personal-site` and adapted: `DoomSiteCertStack` (us-east-1),
+  `DoomSiteFrontendStack` (us-west-2: private bucket, CloudFront with origin access control, A + AAAA alias
+  records). Added: a response-headers policy (content security policy, HSTS, no framing), and no single-page
+  404→index fallback (a missing firmware file must be a 404).
+- `.github/workflows/deploy.yml`: on a push to `main` touching `site/` or `web/`: token check, tests, build,
+  `cdk deploy` with the shared `github-actions-deploy` role.
+- The firmware and the converter the site serves are **committed build outputs**, copied in by
+  `site/sync_firmware.py VERSION` (firmware-only package `doom-b5.fwsc`, SHA-256 `ade8f712…`; `whd_gen_es.js/.wasm`,
+  wasm SHA-256 `b625a72a…`): CI needs no firmware toolchain. `*.fwsc` stays ignored everywhere else.
+
+### One install implementation
+- `web/install.js` (new): the install flow lifted out of `web/installer.html`, with no page in it; progress goes
+  out as events. Both pages use it. Also `probe()`: the identity handshake and, for our firmware, the cmd 0x44
+  question with the QUERY flag: asks, never writes.
+- `web/vendor/felucca/`: Felucca's `fm1pkg.js` and `fm1ota.js`, unmodified copies from v1.1.5 (the clone is not
+  part of this repository). `web/datapack.js` and `convert.js` now import what they use;
+  `web/make_installer.py` still inlines everything (it drops the import lines) and its 13 checks still pass.
+- `web/build_whdgen.sh` also links an ES-module wrapper (`whd_gen_es.js`; the `.wasm` is byte-identical to the
+  classic one). Named `.js` because static hosts do not all serve `.mjs` as JavaScript.
+
+### The page
+- Six steps: Check (browser), Game file (pick / drop a WAD; cut, converted and packed in a Web Worker), Prepare
+  (checklist, a map of the FM-1's 1 MB of flash showing what is replaced and what is kept, an acknowledgement),
+  Connect (asks the FM-1 what it runs; nothing written), Install, Play (controls).
+- A drawing of the FM-1 (laid out from Felucca's `docs/controls.jpg`) stays in view; its screen shows what the
+  real one should show at that point: the firmware's own plain-colour screens, same colours and squares and bars
+  (`doom_dev.c`), dark during the firmware write, then a drawing of the game. Changes of picture use the game's
+  column melt. The picture of the game is drawn for the page; nothing from the WAD is on the site.
+- Install progress as four cells with numerals built from pixels; the manual section has the controls on the
+  same drawing, coloured by what they do.
+- During an install: a leave-page warning, a screen wake lock, and the copy says to keep the tab in front
+  (Chrome slows background tabs' timers, and Felucca's update code runs on timers).
+- VERIFIED from the firmware source while writing the copy: amber appears after ONE start that died within its
+  first 30 s (`bootguard.failed`); three in a row drop to the boot ROM (dark).
+
+### Checks (all on the Mac)
+- `npm test` in `site/frontend`: 28 tests. The install flow against a stand-in FM-1 (`src/lib/fakeFm1.ts`) that
+  models both halves: the standard update (verify reads, loader, whole-image write) and the Doom firmware
+  (identity, cmd 0x44, the pull of block 2). Scenarios: from another firmware; safe mode with block 2 missing;
+  already installed; an older build with the same data; test mode; a firmware that stops asking; no device;
+  `probe`. The WAD pipeline with the ES-module converter: for `doom1.wad` the image and block 2 equal
+  `firmware/pack.py`'s. The controls table is compared with `FM1_MAP` in `fm1_controls.c`.
+- In the Browser pane: the development server with `?demo` (the stand-in device, development builds only)
+  walked through all six steps, a full install, a failed run and the finished state; 1200, 820 and 375 px wide,
+  no horizontal overflow. The production build under `npm run preview`, which sends the same security headers
+  as CloudFront will: worker, dynamic import and WebAssembly all run under
+  `script-src 'self' 'wasm-unsafe-eval'`; the WAD converts in 1.25 s; no console errors; no third-party request.
+- `cdk synth` succeeds with a placeholder hosted-zone id (removed afterwards): the templates hold the bucket,
+  the distribution with the alias `doom.deadlockinteractive.com`, the certificate, two record sets.
+- NOT done: no AWS call (the CLI session had expired), so the hosted zone is not confirmed to exist; nothing
+  deployed; no real FM-1 has met this page.
+
+### Open before it goes live
+- Hosted zone for `deadlockinteractive.com` (a transferred domain does not get one automatically); a GitHub
+  repository with a `main` branch; the repository in the deploy role's trust policy (immutable subject form).
+- `sourceUrl` in `site/frontend/src/site.ts` is empty: the GPL needs a public source link (this repository and
+  the `fm1-port` branch of rp2040-doom).
+- b5 is the build on the site and it still has the 5 % test volume; "going back through Felucca's installer"
+  and an install started while the game runs are still unverified on the device.

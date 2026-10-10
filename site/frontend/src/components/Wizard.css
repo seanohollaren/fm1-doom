@@ -1,0 +1,452 @@
+/* ---- the six steps across the top ---- */
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.stepper__btn {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.6rem 0 0.75rem;
+  border: 0;
+  border-top: 3px solid var(--line);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink-faint);
+  transition:
+    border-color 0.2s var(--ease),
+    color 0.2s var(--ease);
+}
+
+.stepper__btn:disabled {
+  cursor: default;
+}
+
+.stepper__num {
+  font: 500 0.7rem/1 var(--font-mono);
+  letter-spacing: 0.1em;
+}
+
+.stepper__name {
+  font: 700 1.02rem/1 var(--font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepper__item.is-done .stepper__btn {
+  border-top-color: var(--ink-faint);
+  color: var(--ink-soft);
+}
+
+.stepper__item.is-now .stepper__btn {
+  border-top-color: var(--red);
+  color: var(--ink);
+}
+
+.stepper__item.is-now .stepper__num {
+  color: var(--red-hot);
+}
+
+.stepper__btn:not(:disabled):hover {
+  color: var(--ink);
+  border-top-color: var(--ink-soft);
+}
+
+/* ---- one step ---- */
+.panel {
+  margin-top: 0.5rem;
+  padding: clamp(1.25rem, 3.5vw, 2.25rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  animation: panel-in 0.28s var(--ease);
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.panel__title {
+  margin-top: 0.4rem;
+  font-size: clamp(2rem, 4.6vw, 2.9rem);
+  outline: none;
+}
+
+.panel__body {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.panel__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.lead {
+  font-size: 1.05rem;
+  color: var(--ink-soft);
+  max-width: 40rem;
+}
+
+.quiet {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  max-width: 40rem;
+}
+
+.quiet strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sub {
+  margin: 0.5rem 0 -0.4rem;
+  font: 500 0.72rem/1.3 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---- a result, a warning, something in progress ---- */
+.notice {
+  --tone: var(--ink-faint);
+  --wash: transparent;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--radius);
+  background: var(--wash);
+}
+
+.notice--ok {
+  --tone: var(--green);
+  --wash: var(--green-wash);
+}
+
+.notice--warn {
+  --tone: var(--amber);
+  --wash: var(--amber-wash);
+}
+
+.notice--bad {
+  --tone: var(--red);
+  --wash: var(--red-wash);
+}
+
+.notice__mark {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-top: 0.1rem;
+  border-radius: 1px;
+  background: var(--tone);
+  color: var(--bg);
+  font: 700 0.85rem/1 var(--font-mono);
+}
+
+.notice--work .notice__mark,
+.status__spin {
+  background: none;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--red-hot);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.notice__title {
+  display: block;
+  font-weight: 600;
+}
+
+.notice__more {
+  margin-top: 0.15rem;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+
+.hints {
+  display: grid;
+  gap: 0.25rem;
+  padding-left: 1.1rem;
+  list-style: square;
+}
+
+/* ---- step 1: what you need ---- */
+.needs {
+  display: grid;
+  gap: 0;
+}
+
+.needs li {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) 1fr;
+  gap: 0.25rem 1.5rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.needs strong {
+  font-weight: 600;
+}
+
+.needs span {
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+/* ---- step 2: the file ---- */
+.drop {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1.25rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-inset);
+  transition:
+    border-color 0.15s var(--ease),
+    background-color 0.15s var(--ease);
+}
+
+.drop.is-over {
+  border-color: var(--red-hot);
+  border-style: solid;
+  background: var(--red-wash);
+}
+
+.drop__icon {
+  width: 2rem;
+  height: 2rem;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.5;
+  stroke-linecap: square;
+}
+
+.drop.is-over .drop__icon {
+  stroke: var(--red-hot);
+}
+
+.drop__text {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.drop__text strong {
+  font-weight: 600;
+}
+
+.drop__text span {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+/* ---- numbered things to do ---- */
+.todo {
+  display: grid;
+  counter-reset: todo;
+}
+
+.todo li {
+  counter-increment: todo;
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.todo li::before {
+  content: counter(todo, decimal-leading-zero);
+  grid-row: span 2;
+  font: 500 0.78rem/1.9 var(--font-mono);
+  color: var(--red-hot);
+}
+
+.todo strong {
+  font-weight: 600;
+}
+
+.todo span {
+  grid-column: 2;
+  color: var(--ink-soft);
+  font-size: 0.93rem;
+}
+
+.ack {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.ack:has(input:checked) {
+  border-color: var(--red);
+  background: var(--red-wash);
+}
+
+.ack input {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  margin: 0.12rem 0 0;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 2px;
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+.ack input:checked {
+  border-color: var(--red);
+  background: var(--red);
+}
+
+.ack input:checked::after {
+  content: '';
+  width: 0.38rem;
+  height: 0.7rem;
+  margin-top: -0.12rem;
+  border: solid var(--on-red);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ---- step 4 ---- */
+.action {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+/* ---- step 5 ---- */
+.manifest {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+
+.manifest > div {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.manifest__id {
+  margin-left: 0.4rem;
+  color: var(--ink-faint);
+}
+
+.launch {
+  display: grid;
+  justify-items: start;
+  gap: 0.9rem;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 3rem;
+  font-size: 1.02rem;
+}
+
+.status--failed {
+  color: var(--amber);
+}
+
+.status--done {
+  color: var(--green);
+}
+
+.status__spin {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
+.log {
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+}
+
+.log summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.log pre {
+  max-height: 12rem;
+  margin: 0.6rem 0 0;
+  padding: 0.75rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font: 400 0.74rem/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 40rem) {
+  .stepper__name {
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+  }
+  .stepper__item:not(.is-now) .stepper__name {
+    display: none;
+  }
+  .stepper {
+    grid-template-columns: repeat(6, auto);
+  }
+  .stepper__item.is-now {
+    grid-column: span 1;
+    min-width: 6.5rem;
+  }
+  .needs li {
+    grid-template-columns: 1fr;
+  }
+  .drop {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+  .drop__icon {
+    display: none;
+  }
+  .manifest > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}

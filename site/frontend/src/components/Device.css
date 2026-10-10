@@ -1,0 +1,137 @@
+.device {
+  position: relative;
+  width: 100%;
+  filter: drop-shadow(0 18px 28px var(--dv-shadow));
+}
+
+.device__body {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.device__screen {
+  position: absolute;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+  border-radius: 1px;
+}
+
+.dv-case {
+  fill: var(--dv-case);
+}
+
+.dv-case-edge {
+  fill: none;
+  stroke: var(--dv-case-edge);
+  stroke-width: 1.5;
+}
+
+.dv-well {
+  fill: var(--dv-well);
+}
+
+.dv-bezel {
+  fill: var(--dv-bezel);
+}
+
+.dv-glass {
+  fill: var(--dv-bezel);
+}
+
+.dv-key {
+  fill: var(--dv-key);
+  stroke: var(--dv-key-edge);
+  stroke-width: 1;
+}
+
+.dv-knob__skirt {
+  fill: var(--dv-knob);
+}
+
+.dv-knob__cap {
+  fill: var(--dv-knob-cap);
+}
+
+.dv-knob__mark {
+  stroke: var(--dv-case);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.dv-btn rect {
+  fill: var(--dv-btn);
+  stroke: var(--dv-case-edge);
+  stroke-width: 1;
+}
+
+.dv-btn text,
+.dv-tag {
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+  fill: var(--dv-btn-text);
+}
+
+/* --- the controls drawing: each control takes the colour of what it does --- */
+.device--controls .dv-key,
+.device--controls .dv-btn rect,
+.device--controls .dv-knob__cap,
+.device--controls .dv-btn text {
+  transition:
+    fill 0.18s var(--ease),
+    opacity 0.18s var(--ease);
+}
+
+.device--controls .is-dim {
+  opacity: 0.28;
+}
+
+.device--controls .dv-key.is-move,
+.device--controls .dv-btn.is-move rect,
+.device--controls .dv-knob.is-move .dv-knob__cap {
+  fill: var(--g-move);
+  stroke: var(--g-move);
+}
+
+.device--controls .dv-key.is-side,
+.device--controls .dv-btn.is-side rect {
+  fill: var(--g-side);
+  stroke: var(--g-side);
+}
+
+.device--controls .dv-key.is-fire,
+.device--controls .dv-btn.is-fire rect {
+  fill: var(--g-fire);
+  stroke: var(--g-fire);
+}
+
+.device--controls .dv-key.is-use,
+.device--controls .dv-btn.is-use rect {
+  fill: var(--g-use);
+  stroke: var(--g-use);
+}
+
+.device--controls .dv-btn.is-weapon rect,
+.device--controls .dv-knob.is-weapon .dv-knob__cap {
+  fill: var(--g-weapon);
+  stroke: var(--g-weapon);
+}
+
+.device--controls .dv-btn.is-menu rect {
+  fill: var(--g-menu);
+  stroke: var(--g-menu);
+}
+
+.device--controls .dv-btn.is-view rect {
+  fill: var(--g-view);
+  stroke: var(--g-view);
+}
+
+.device--controls .dv-btn.has-group text {
+  fill: var(--on-group);
+}
+
+.device--controls .dv-tag {
+  fill: var(--ink-soft);
+}

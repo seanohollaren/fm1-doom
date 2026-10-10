@@ -1,0 +1,47 @@
+name: Deploy Doom FM-1 Site
+
+# The site at doom.deadlockinteractive.com: site/frontend (Vite + React) on S3 + CloudFront, set up by site/infra (CDK).
+# The firmware and the data converter it serves are committed build outputs (site/sync_firmware.py), so nothing
+# here needs the firmware toolchain.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::514220683169:role/github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install CDK dependencies
+        working-directory: site/infra
+        run: npm ci
+
+      - name: Test and build frontend
+        working-directory: site/frontend
+        run: npm ci && npm run check:tokens && npm test && npm run build
+
+      - name: CDK deploy
+        working-directory: site/infra
+        run: npx cdk deploy DoomSiteCertStack DoomSiteFrontendStack --require-approval never
