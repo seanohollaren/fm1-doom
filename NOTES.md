@@ -1223,3 +1223,81 @@ No blocker. Three risks, all fixed and confirmed in the new disassembly:
   unchanged (`e4dcdbba…`, equal to the FM-1's). 16 package runs + Felucca 1.5's update test + the page test
   pass; the predicted flash passes `check_dump.py` and the replayed start-up check. Symbols:
   `firmware/installed_adf49dab/`. Site: `firmware/build/site_one` (port 8796).
+
+## 2026-10-09 ~19:45 — A hosted installer with no game data in it: the page converts the visitor's own WAD (built and Mac-tested; nothing new on the device)
+
+Sean's question: could the public page install Freedoom by default and offer "bring your own Doom WAD"?
+Short answer: bring-your-own works and is built; Freedoom's levels do not fit.
+
+### Freedoom does not fit (VERIFIED: every Phase 1 level cut and converted)
+- Downloaded with Sean's yes: `freedoom-0.13.0.zip` (24,143,781 B) from the project's GitHub releases into `wads/`.
+  SHA-256 `3f9b264f…9688f59` equals the project's CHECKSUM file (its PGP signature was not checked).
+- Three things stop the converter before size is even a question:
+  1. `whd_gen` crashed on a one-colour flat (`__builtin_clz(0)` in its statistics). Fixed on `fm1-port`.
+  2. Freedoom's music lumps are MIDI; `whd_gen` reads MUS only ("Expected MUS track").
+  3. The WHX format's level encodings are tuned to id's own maps: a line's back sidedef must directly follow its
+     front one, the packed sidedefs must be shorter than the packed linedefs, a sidedef at most 7 bytes, fewer
+     than 2,048 vertices, sector numbers and tags in a byte. Freedoom's levels break these as shipped.
+- `tools/freedoom_survey.py` works around what can be worked around (sidedefs put in linedef order, texture
+  offsets reduced to x mod 256 / y mod 128 and made even, lumps the converter ignores dropped, sounds at
+  5.5 kHz, stand-in music) and converts each level with an assertion-enabled `whd_gen`:
+  **19 of 36 levels convert; the smallest is E2M8 at 781,640 B (an arena with two bosses), then E3M1 964,440 B,
+  E2M2 1,031,468 B, E1M5 1,034,092 B … E4M8 1,851,640 B. The other 17 hit hard limits of the format.**
+- Room for data with the b5 firmware: **630,044 B** (314,652 B behind the firmware in the app slot + 315,392 B
+  at `0x93000`). Doom's E1M1 cut is 607,328 B.
+- Where Freedoom's bytes go (E3M1): walls 201 KB (59 patches at 3.4 KB each; Doom's E1M1 has 70 at 2.0 KB),
+  sounds 157 KB at 5.5 kHz (Doom's set: 87 KB), monsters 88 + 69 + 45 KB, and 179 KB of status bar, fonts, menu
+  art, palette and tables that any level needs. Trimming my survey's excess (a corpse decoration that pulled in
+  a whole monster's sprites, multiplayer-only weapons, unused sounds) would bring E3M1 to roughly 790–870 KB:
+  still far over. ASSUMED: that estimate; the survey numbers themselves are measured.
+- Conclusion: no Freedoom level as shipped can be the default. A free default would have to be a level made to
+  this budget from Freedoom's art (about as many textures and monster types as Doom's E1M1). Not built. The
+  installer can host such data when it exists (`make_installer.py --bundle`).
+- Noticed in passing (upstream rp2040-doom, not fixed): `r_state.h side_rowoffset16()` reads the size of the
+  x offset from the FIRST sidedef of the level (`sides_z[0]`) and the low byte of a two-byte row offset from
+  `sides_z[pos + 1]`. VERIFIED harmless for Doom's E1M1 (41 sidedefs have a row offset; none is affected); it
+  would misalign wall textures on other levels.
+
+### What was built (all VERIFIED on the Mac unless marked)
+- `web/build_whdgen.sh` → `web/build/whdgen/whd_gen.{js,wasm}` (647 KB): rp2040-doom's converter for the browser,
+  assertions ON (its only input checks), `-DLOOKAHEAD=5`.
+  - Finding: `whd_gen`'s output depends on `NDEBUG` (`config.h`: sound encoder look-ahead 5 in a release build,
+    3 otherwise). `LOOKAHEAD` can now be set from the command line (`fm1-port`), and with 5 an
+    assertion-enabled build, native or WebAssembly, writes the release build's bytes.
+  - The output's header carries the input's file name, so the page always names it `E1M1_6H.WAD`.
+  - Result for `wads/doom1.wad`: SHA-256 `7450083e…83862d85`, byte-for-byte `data/e1m1_6h.whx`.
+- `web/wadcut.js`: `tools/cut_wad.py SRC DST 6 --half-sfx` in JavaScript (byte-identical output for `doom1.wad`),
+  plus what a full-game `DOOM.WAD` needs (TEXTURE2 merged, further section markers) and refusals with reasons
+  (not a WAD, PWAD, Doom II layout, Freedoom, damaged). `DOOM.WAD` itself is NOT tested: no such file here.
+- `web/datapack.js`: `firmware/pack.py`'s split point, descriptor, record-lookalike check and package assembly
+  in JavaScript, on Felucca's `Package.setApp` (no packaging code of our own). Input: `doom_code.fwsc` (the
+  firmware alone) and the numbers `pack.py` now writes into `doom_install.json` (`img_len`, `desc_at`,
+  `app_slot`). For the shareware WAD the install image (SHA-256 `a5fcfee3…b6d1f6b0`) and block 2
+  (`e4dcdbba…fce0858f`) are **identical to `pack.py`'s b5 files**, i.e. to what was installed from
+  `site_one`.
+- `web/convert.js`: the three steps in one call; recognises the shareware 1.9 WAD by SHA-256
+  (`1d7d43be…26cac771`) and refuses to go on if its converted data is not the tested one.
+- `web/installer.html`, reworked as the public page: step 1 "Game data" (choose or drop a WAD; result line says
+  whether it is the tested data), step 2 "Install" (the b5 flow, unchanged), and sections on what changes on
+  the FM-1, controls, the plain-colour screens, going back. Other Doom 1 WADs are accepted with a warning that
+  the data is untested.
+- `web/make_installer.py VERSION OUT_DIR [--source URL] [--wad-help URL] [--bundle "LABEL=FILE.whx[=NOTE]"]`:
+  the site is `index.html`, the firmware-only package (`doom_code.fwsc`, SHA-256 `ade8f712…e3196f3f`, checked
+  by the page), `whd_gen.js/.wasm` and `LICENSES/`. No game data unless `--bundle` is given.
+- `web/test_installer.js SITE [WAD]`: 13 checks; the data step runs the real converter. Passes on both sites.
+  In the Browser pane (Chromium): the page prepared `doom1.wad` in 1.1 s with the hashes above; file chooser
+  and drop paths both work; no horizontal overflow at 375 px; light and dark.
+- Sites: `firmware/build/site_public` (no game data), `firmware/build/site_dev` (the same plus a bundled copy
+  of the shareware cut and `_local/` links to the WADs: PRIVATE, never publish), preview `fm1-install-site`
+  on port 8797. `site_one` (port 8796, the b5 page Sean is testing) was not touched.
+
+### Open before this page goes public
+- NOT run on the device. The install flow is b5's, and what it installs is byte-identical to b5.
+- The GPL needs the source address on the page (`--source`): this repository and the `fm1-port` branch of
+  rp2040-doom are local only today.
+- "Going back: use Felucca's installer" is ASSUMED (same protocol path our own page uses; never done from Doom).
+  Installing while the game runs (not from a safe screen) is also not yet VERIFIED on the device.
+- The controls section restates `fm1_controls.c` by hand; it must follow any control change.
+- The "about the file" link (Doom Wiki, DOOM1.WAD) could not be checked from here: the site answers a bot check.
+- A default that needs no file: Sean to choose between (a) the page fetching the unmodified shareware WAD
+  from a public mirror in the visitor's browser, checked by SHA-256, (b) a made-to-fit free level, (c) as built.

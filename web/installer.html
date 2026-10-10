@@ -1,28 +1,56 @@
 <!doctype html>
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- FM-1 Doom: the one-button installer. The update protocol code (fm1pkg.js, fm1ota.js) is Felucca's,
-     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, GPL-3.0-only, inlined by
-     web/make_installer.py. This page adds a second phase: once the firmware is on, it hands the firmware the
-     second block of the game data, which the firmware writes to flash itself (firmware/doom_dev.c, cmd 0x44). -->
+<!-- FM-1 Doom: the installer page. No game data is hosted with it: the user picks their own Doom WAD and the page
+     cuts and converts it in the browser (wadcut.js, rp2040-doom's whd_gen as WebAssembly, datapack.js), then
+     installs the firmware with the first block of the data, and hands the firmware the second block, which the
+     firmware writes to flash itself (firmware/doom_dev.c, cmd 0x44).
+     The update protocol code (fm1pkg.js, fm1ota.js) is Felucca's, Copyright (C) 2026 Leo Kuroshita
+     (@kurogedelic), Hügelton Instruments, GPL-3.0-only. web/make_site.py inlines the scripts. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Doom for the FM-1: installer</title>
+<title>Doom for the FM-1</title>
+<meta name="description" content="Play the first level of Doom on an M-VAVE FM-1 pocket synth. Installs from this page over USB.">
 <style>
-  :root { --bg: #131316; --card: #1c1c21; --fg: #ecebe8; --dim: #96948e; --line: #2e2e35; --accent: #c8402c; --ok: #58b877; --bad: #e0624d; --track: #2a2a31; }
+  :root { --bg: #111114; --card: #1a1a1f; --fg: #eceae6; --dim: #9a978f; --line: #2c2c33; --accent: #c8402c; --accent-fg: #fff;
+          --ok: #58b877; --bad: #e0624d; --warn: #d9a441; --track: #29292f; --soft: #202026; }
   @media (prefers-color-scheme: light) {
-    :root { --bg: #f4f3ef; --card: #ffffff; --fg: #1b1b1d; --dim: #6a6862; --line: #dedcd5; --ok: #2f8f52; --bad: #b83a26; --track: #e6e4dd; }
+    :root { --bg: #f4f2ec; --card: #ffffff; --fg: #1b1b1d; --dim: #68665f; --line: #dcd9d0; --ok: #2f8f52; --bad: #b83a26;
+            --warn: #a8741a; --track: #e6e3da; --soft: #f1efe8; }
   }
   * { box-sizing: border-box; }
-  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
-  main { max-width: 30rem; margin: 0 auto; padding: 2.5rem 1rem 3rem; }
-  h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; letter-spacing: -.01em; }
-  .sub { color: var(--dim); font-size: .9rem; margin: .3rem 0 1.4rem; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+  a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent); }
+  main { max-width: 38rem; margin: 0 auto; padding: 2.75rem 1rem 3.5rem; }
+  .hero { display: flex; gap: 1.25rem; align-items: center; margin: 0 .15rem 2rem; }
+  .hero svg { flex: none; width: 6.5rem; height: auto; }
+  .eyebrow { margin: 0 0 .35rem; font-size: .74rem; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: clamp(1.7rem, 5vw, 2.15rem); line-height: 1.1; margin: 0; letter-spacing: -.02em; }
+  .lede { color: var(--dim); margin: .55rem 0 0; font-size: 1rem; max-width: 30rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: .9rem; padding: 1.35rem 1.35rem 1.45rem; margin: 0 0 1rem; }
+  .card h2 { display: flex; align-items: center; gap: .65rem; font-size: 1.08rem; margin: 0 0 .7rem; letter-spacing: -.005em; }
+  .num { flex: none; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center;
+         font-size: .82rem; font-weight: 700; }
+  .card p { margin: 0 0 .9rem; }
+  .muted { color: var(--dim); font-size: .9rem; }
+  button { font: inherit; font-weight: 650; padding: .78rem 1.1rem; border: 0; border-radius: .55rem; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:focus-visible, .drop:focus-within { outline: 2px solid var(--fg); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.second { background: transparent; color: var(--fg); border: 1px solid var(--line); font-weight: 600; }
+  button.wide { width: 100%; }
+  .drop { border: 1.5px dashed var(--line); border-radius: .7rem; padding: 1.1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; background: var(--soft); }
+  .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--soft)); }
+  .drop .or { color: var(--dim); font-size: .9rem; }
+  .result { display: none; gap: .7rem; align-items: flex-start; margin: 1rem 0 0; padding: .8rem .9rem; border-radius: .6rem; background: var(--soft); border: 1px solid var(--line); }
+  .result.show { display: flex; }
+  .result .ic { flex: none; width: 1.35rem; height: 1.35rem; border-radius: 50%; display: grid; place-items: center; font-size: .75rem; font-weight: 700; color: #fff; background: var(--dim); margin-top: .12rem; }
+  .result.ok .ic { background: var(--ok); } .result.warn .ic { background: var(--warn); } .result.fail .ic { background: var(--bad); }
+  .result.work .ic { background: transparent; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  .result b { display: block; font-weight: 650; }
+  .result span.more { display: block; color: var(--dim); font-size: .88rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .prep { margin: 0 0 1.1rem; padding: 0 0 0 1.15rem; color: var(--dim); font-size: .92rem; }
   .prep li { margin: .2rem 0; }
-  button { font: inherit; font-weight: 650; width: 100%; padding: .8rem 1rem; border: 0; border-radius: .55rem; background: var(--accent); color: #fff; cursor: pointer; }
-  button:hover:not(:disabled) { filter: brightness(1.08); }
-  button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-  button:disabled { opacity: .45; cursor: default; }
   .stages { list-style: none; margin: 1.3rem 0 1rem; padding: 0; }
   .stage { display: flex; align-items: center; gap: .7rem; padding: .32rem 0; color: var(--dim); }
   .stage .dot { flex: none; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; font-size: .78rem; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -40,21 +68,67 @@
   .fill.fail { background: var(--bad); }
   #pct { width: 3.2ch; text-align: right; font-size: .85rem; color: var(--dim); font-variant-numeric: tabular-nums; }
   #say { margin: .9rem 0 0; min-height: 3rem; font-size: .95rem; }
-  .fine { color: var(--dim); font-size: .82rem; margin: 1.2rem .2rem 0; }
-  details { margin: 1rem .2rem 0; color: var(--dim); font-size: .82rem; }
-  summary { cursor: pointer; }
+  .info { margin: 1.6rem .15rem 0; }
+  .info details { border-top: 1px solid var(--line); padding: .7rem 0; }
+  .info details:last-child { border-bottom: 1px solid var(--line); }
+  .info summary { cursor: pointer; font-weight: 600; }
+  .info details > *:not(summary) { color: var(--dim); font-size: .93rem; }
+  .info ul { margin: .6rem 0 .2rem; padding-left: 1.15rem; }
+  .info li { margin: .3rem 0; }
+  .info p { margin: .6rem 0 .2rem; }
+  .sw { display: inline-block; width: .8em; height: .8em; border-radius: 2px; margin-right: .35em; vertical-align: -.05em; border: 1px solid var(--line); }
+  kbd { font: inherit; font-size: .85em; font-weight: 600; padding: .05em .4em; border: 1px solid var(--line); border-radius: .3em; background: var(--soft); color: var(--fg); white-space: nowrap; }
   pre { font-size: .72rem; white-space: pre-wrap; max-height: 11rem; overflow: auto; margin: .5rem 0 0; }
-  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+  footer { margin: 1.8rem .15rem 0; color: var(--dim); font-size: .8rem; }
+  footer p { margin: 0 0 .6rem; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  @media (max-width: 30rem) { .hero svg { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } .result.work .ic { animation: none; } }
 </style></head><body><main>
-<h1>Doom for the FM-1</h1>
-<p class="sub" id="what">&nbsp;</p>
-<div class="card">
+<header class="hero">
+  <svg viewBox="0 0 130 84" aria-hidden="true">
+    <rect x="1" y="1" width="128" height="82" rx="9" fill="var(--card)" stroke="var(--line)" stroke-width="2"/>
+    <rect x="10" y="9" width="30" height="30" rx="3" fill="#0b0b0d" stroke="var(--line)"/>
+    <path d="M15 31 L20 17 L25 26 L30 15 L35 31 Z" fill="var(--accent)"/>
+    <g fill="none" stroke="var(--dim)" stroke-width="1.6"><circle cx="54" cy="16" r="4.6"/><circle cx="70" cy="16" r="4.6"/><circle cx="86" cy="16" r="4.6"/><circle cx="102" cy="16" r="4.6"/>
+      <circle cx="54" cy="32" r="4.6"/><circle cx="70" cy="32" r="4.6"/><circle cx="86" cy="32" r="4.6"/><circle cx="116" cy="24" r="6.2"/></g>
+    <g fill="var(--fg)" opacity=".88"><rect x="10" y="48" width="6.2" height="27" rx="1"/><rect x="17" y="48" width="6.2" height="27" rx="1"/><rect x="24" y="48" width="6.2" height="27" rx="1"/><rect x="31" y="48" width="6.2" height="27" rx="1"/>
+      <rect x="38" y="48" width="6.2" height="27" rx="1"/><rect x="45" y="48" width="6.2" height="27" rx="1"/><rect x="52" y="48" width="6.2" height="27" rx="1"/><rect x="59" y="48" width="6.2" height="27" rx="1"/>
+      <rect x="66" y="48" width="6.2" height="27" rx="1"/><rect x="73" y="48" width="6.2" height="27" rx="1"/><rect x="80" y="48" width="6.2" height="27" rx="1"/><rect x="87" y="48" width="6.2" height="27" rx="1"/>
+      <rect x="94" y="48" width="6.2" height="27" rx="1"/><rect x="101" y="48" width="6.2" height="27" rx="1"/><rect x="108" y="48" width="6.2" height="27" rx="1"/><rect x="115" y="48" width="6.2" height="27" rx="1"/></g>
+    <g fill="#0b0b0d"><rect x="14.5" y="48" width="4.2" height="16"/><rect x="21.5" y="48" width="4.2" height="16"/><rect x="28.5" y="48" width="4.2" height="16"/><rect x="42.5" y="48" width="4.2" height="16"/><rect x="49.5" y="48" width="4.2" height="16"/>
+      <rect x="63.5" y="48" width="4.2" height="16"/><rect x="70.5" y="48" width="4.2" height="16"/><rect x="77.5" y="48" width="4.2" height="16"/><rect x="91.5" y="48" width="4.2" height="16"/><rect x="98.5" y="48" width="4.2" height="16"/><rect x="112.5" y="48" width="4.2" height="16"/></g>
+  </svg>
+  <div>
+    <p class="eyebrow">Experimental firmware · M-VAVE FM-1</p>
+    <h1>Doom for the FM-1</h1>
+    <p class="lede">The first level of Doom on the synth's own screen, keys and speaker. It installs from this page over USB.</p>
+  </div>
+</header>
+
+<section class="card" id="datacard">
+  <h2><span class="num">1</span>Game data</h2>
+  <p>The Doom engine is free software. The game's levels, pictures and sounds are not, so this page doesn't carry them.
+     You bring the game file, and the page cuts it down to fit the FM-1 here in your browser. The file is not uploaded anywhere.</p>
+  <div class="drop" id="drop">
+    <button id="pick" type="button">Choose DOOM1.WAD</button>
+    <span class="or">or drop the file here</span>
+    <input class="vh" type="file" id="file" accept=".wad,.WAD" tabindex="-1" aria-label="Doom WAD file">
+  </div>
+  <div id="bundled"></div>
+  <div class="result" id="res" role="status" aria-live="polite"><span class="ic" id="resic"></span><div><b id="rest"></b><span class="more" id="resm"></span></div></div>
+  <p class="muted" style="margin:1rem 0 0">DOOM1.WAD is the free shareware release of Doom (version 1.9, 4.2 MB): <a id="wadhelp" href="https://doomwiki.org/wiki/DOOM1.WAD" target="_blank" rel="noopener">about the file</a>.
+     DOOM.WAD from the full game should work too, but only the shareware file has been tested.</p>
+</section>
+
+<section class="card">
+  <h2><span class="num">2</span>Install</h2>
   <ul class="prep">
     <li>Connect the FM-1 straight to this computer by USB, no hub, and switch it on.</li>
-    <li>Use Chrome or Edge, and close other apps and tabs that use MIDI.</li>
+    <li>Use Chrome or Edge on a computer, and close other apps and tabs that use MIDI.</li>
     <li>Leave the cable and this page alone until it says Done.</li>
   </ul>
-  <button id="go" disabled>Install</button>
+  <button id="go" class="wide" disabled>Install</button>
   <ol class="stages">
     <li class="stage" id="st1"><span class="dot" id="st1d">1</span><span>Find the FM-1</span><span class="note" id="st1n"></span></li>
     <li class="stage" id="st2"><span class="dot" id="st2d">2</span><span>Install the firmware</span><span class="note" id="st2n"></span></li>
@@ -63,13 +137,54 @@
   </ol>
   <div class="meter"><div class="track"><div class="fill" id="bar"></div></div><span id="pct">0%</span></div>
   <p id="say" role="status" aria-live="polite">Loading&hellip;</p>
-</div>
-<p class="fine">Experimental firmware, tested on one FM-1. It replaces the synth firmware and overwrites the area where Felucca keeps
-saved projects and samples. Presets saved by the original firmware are not touched. Use at your own risk.</p>
-<details><summary>Details</summary><pre id="log"></pre></details>
+</section>
+
+<section class="info">
+  <details><summary>What this changes on the FM-1</summary>
+    <ul>
+      <li>It replaces the synth firmware. The FM-1 is a Doom machine until you install a synth firmware again.</li>
+      <li>It overwrites the part of the memory where Felucca keeps saved projects and samples. Back those up from Felucca first if you want them.</li>
+      <li>Presets saved by M-VAVE's original firmware are not touched.</li>
+      <li>The FM-1's boot code is never written. Holding <kbd>HOME</kbd> while switching on always brings up a screen that waits for an install instead of starting the game.</li>
+    </ul>
+    <p>This is experimental firmware, tested on one FM-1. Use it at your own risk.</p>
+  </details>
+  <details><summary>Controls</summary>
+    <ul>
+      <li>Move with the low keys: <kbd>G</kbd> and <kbd>B</kbd> turn, the black keys between them go forward, <kbd>A</kbd> goes back, <kbd>F</kbd> and <kbd>C</kbd> step sideways, <kbd>F♯</kbd> runs.</li>
+      <li>At the top of the keyboard: <kbd>E</kbd> or <kbd>F</kbd> fires, <kbd>D</kbd> or the top <kbd>G</kbd> opens doors and presses switches.</li>
+      <li><kbd>REC</kbd> also fires. <kbd>PLAY</kbd> is Enter, <kbd>HOME</kbd> opens the menu, <kbd>OCT−</kbd> and <kbd>OCT+</kbd> change weapon.</li>
+      <li><kbd>SCL</kbd> changes the picture shape, <kbd>ENV</kbd> shows the frame rate.</li>
+    </ul>
+  </details>
+  <details><summary>If the screen shows a plain colour</summary>
+    <ul>
+      <li><span class="sw" style="background:#1d3fd0"></span>Blue: the firmware is waiting for game data. Press Install on this page.</li>
+      <li><span class="sw" style="background:#19c7d6"></span>Cyan: you held <kbd>HOME</kbd> while switching on. The FM-1 waits for an install instead of starting the game.
+          Use this if the page can't find the FM-1 while Doom is running.</li>
+      <li><span class="sw" style="background:#e0a020"></span>Amber: the game failed to start. Press Install again, or hold <kbd>PLAY</kbd> for two seconds to try the game once more.</li>
+      <li><span class="sw" style="background:#d02828"></span>Red or <span class="sw" style="background:#c22bc2"></span>magenta: the game stopped. The FM-1 restarts by itself.</li>
+      <li>Dark, after three minutes on one of these screens with no computer talking to it: switch the FM-1 off and on.</li>
+    </ul>
+  </details>
+  <details><summary>Going back to a synth firmware</summary>
+    <p>Open <a href="https://hugelton.github.io/Felucca/" target="_blank" rel="noopener">Felucca's installer</a> and install it as on any FM-1.
+       From Felucca you can return to M-VAVE's original firmware the usual way.</p>
+  </details>
+  <details><summary>Details of the last run</summary><pre id="log"></pre></details>
+</section>
+
+<footer>
+  <p id="what">&nbsp;</p>
+  <p>Built on <a href="https://github.com/kilograham/rp2040-doom" target="_blank" rel="noopener">rp2040-doom</a> by Graham Sanderson and
+     <a href="https://www.chocolate-doom.org/" target="_blank" rel="noopener">Chocolate Doom</a> (GPL-2.0-or-later; Doom source © id Software), and on the hardware layer and
+     update loader of <a href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener">Felucca</a> by Leo Kuroshita (GPL-3.0-only). The firmware file also holds three
+     files of the JieLi AC79 SDK (Apache-2.0). The firmware as a whole is under the GPL, version 3. <span id="src"></span></p>
+  <p>DOOM is a trademark of id Software. This project is not affiliated with id Software, ZeniMax, M-VAVE or Hügelton Instruments.</p>
+</footer>
 <script>
 /*LIB*/
-const meta = /*META*/;
+const site = /*META*/;
 const $ = (id) => document.getElementById(id);
 const say = (s) => { $("say").textContent = s; };
 const log = (s) => { $("log").textContent += s + "\n"; };
@@ -78,8 +193,78 @@ const force = new URLSearchParams(location.search).get("force") === "1";
 const le32 = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
 const rd32 = (u, i) => (u[i] | (u[i + 1] << 8) | (u[i + 2] << 16) | (u[i + 3] << 24)) >>> 0;
 const MODES = ["game", "safe (last start failed)", "safe (HOME held)", "safe (no data)", "safe (second block missing)"];
+const kb = (n) => Math.round(n / 1024) + " KB";
 
-// the four stages and the one bar: stage(n, "now" | "done" | "fail" | "", note)
+// ---- step 1: the game data. base = the firmware-only package; after a file is prepared: image, data2, meta
+let base = null, image = null, data2 = null, meta = null, writing = false, busy = false;
+const canMidi = !!navigator.requestMIDIAccess;
+function result(state, title, more) {
+  $("res").className = "result show " + state;
+  $("resic").textContent = state === "ok" ? "✓" : state === "warn" ? "!" : state === "fail" ? "×" : "";
+  $("rest").textContent = title; $("resm").textContent = more || "";
+}
+function gate(quiet) {
+  $("go").disabled = writing || busy || !image || !canMidi;
+  $("pick").disabled = writing || busy || !base;
+  for (const b of document.querySelectorAll("#bundled button")) b.disabled = writing || busy || !base;
+  if (!quiet && !writing && canMidi && base) say(image ? (force ? "Ready. Test mode: the game data will be rewritten even if it is already there." : "Ready to install.") : "Choose the game file first.");
+}
+const paint = () => new Promise((ok) => requestAnimationFrame(() => setTimeout(ok, 0)));
+function loadConverter() {
+  if (window.WhdGen) return Promise.resolve(window.WhdGen);
+  return new Promise((ok, bad) => {
+    const s = document.createElement("script");
+    s.src = site.whdgen;
+    s.onload = () => (window.WhdGen ? ok(window.WhdGen) : bad(new Error("the converter did not load")));
+    s.onerror = () => bad(new Error("the converter could not be downloaded; reload the page"));
+    document.head.appendChild(s);
+  });
+}
+function adopt(r, title, state, more) {
+  image = logicalImage(r.pkg); data2 = r.data2; meta = r.meta;
+  log(`data: ${r.info.whxLen} B (sha256 ${r.info.dataSha.slice(0, 16)}), block 1 ${meta.split} B with the firmware, block 2 ${meta.data2_len} B, build ${meta.build.toString(16)}`);
+  result(state, title, `${kb(r.info.whxLen)} of game data; about ${kb(r.info.capacity)} fit. ${more}`);
+}
+async function useWad(file) {
+  if (busy || writing || !base) return;
+  busy = true; image = data2 = meta = null; gate();
+  result("work", `Preparing ${file.name}`, "Cutting it down to one level and packing it for the FM-1. This takes a few seconds.");
+  await paint();
+  try {
+    if (file.size > 64 << 20) throw new WadError("This file is too large to be a Doom WAD.");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const r = await prepare(bytes, base, site.fw, await loadConverter());
+    log(`${file.name}: ${bytes.length} B, sha256 ${r.info.wadSha.slice(0, 16)}; cut to ${r.info.cut.lumps} lumps`);
+    if (r.info.known) adopt(r, "Ready: Doom shareware 1.9, level E1M1", "ok", "This is exactly the data that has been tested on an FM-1.");
+    else adopt(r, `Ready: level E1M1 from ${file.name}`, "warn", "This is not the shareware 1.9 file, so this data has not been tried on an FM-1. " +
+      "If the game doesn't start, the FM-1 shows a plain colour and waits for another install.");
+  } catch (e) {
+    log(`${file.name}: ${e && e.message}${e && e.detail ? " [" + e.detail + "]" : ""}`);
+    const why = e instanceof WadError || e instanceof ConvertError ? e.message : e instanceof DataError ? "This WAD can't be used: " + e.message + "." : "";
+    result("fail", `Can't use ${file.name}`, why ? why + " The shareware DOOM1.WAD, version 1.9, is the file this was made for." : "Something went wrong: " + String(e && e.message || e));
+  }
+  busy = false; gate();
+}
+async function useBundled(b) {
+  if (busy || writing || !base) return;
+  busy = true; image = data2 = meta = null; gate();
+  result("work", `Loading ${b.label}`, "");
+  try {
+    const r = await fetch(b.file);
+    if (!r.ok) throw new Error(`${b.file}: HTTP ${r.status}`);
+    adopt(await prepareData(new Uint8Array(await r.arrayBuffer()), base, site.fw), `Ready: ${b.label}`, "ok", b.note || "");
+  } catch (e) { log(String(e && e.message || e)); result("fail", `Could not load ${b.label}.`, String(e && e.message || e)); }
+  busy = false; gate();
+}
+$("pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", () => { const f = $("file").files[0]; $("file").value = ""; if (f) useWad(f); });
+for (const ev of ["dragenter", "dragover"]) $("datacard").addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+for (const ev of ["dragleave", "drop"]) $("datacard").addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.remove("over"); });
+$("datacard").addEventListener("drop", (e) => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) useWad(f); });
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+// ---- step 2: the install. The four stages and the one bar: stage(n, "now" | "done" | "fail" | "", note)
 let current = 0;
 function stage(n, state, note) {
   $("st" + n).className = "stage" + (state ? " " + state : "");
@@ -130,34 +315,36 @@ async function ask(link, flags) {
 const mine = (r) => r && r.build === meta.build && r.total === meta.total && r.split === meta.split && r.crc2 === meta.data2_crc16;
 function stop(msg) { const e = new Error(msg); e.shown = true; return e; }
 
-let image = null, data2 = null, writing = false;
 window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "Writing. Do not close the page."; } });
 
 (async () => {
-  $("what").textContent = `Build ${meta.version} · the first level of the shareware game`;
-  if (!navigator.requestMIDIAccess) { say("This browser can't talk to the FM-1. Open the page in Chrome or Edge on a computer."); return; }
+  $("what").textContent = `Build ${site.version} · firmware ${site.fw.build.toString(16).padStart(8, "0")}`;
+  if (site.source) $("src").innerHTML = `<a href="${site.source}" target="_blank" rel="noopener">Source code</a> and <a href="LICENSES/">licence texts</a>.`;
+  if (site.wad_help) $("wadhelp").href = site.wad_help;
+  for (const b of site.bundled || []) {
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "second"; btn.style.marginTop = ".8rem"; btn.textContent = `Use ${b.label}`;
+    btn.addEventListener("click", () => useBundled(b));
+    $("bundled").appendChild(btn);
+  }
+  if (!canMidi) say("This browser can't talk to the FM-1. Open the page in Chrome or Edge on a computer.");
   try {
     if (JSON.stringify(frame(0x11, [])) !== JSON.stringify([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])) throw new Error("self-check failed");
-    let r = await fetch(meta.pkg);
-    if (!r.ok) throw new Error(`${meta.pkg}: HTTP ${r.status}`);
+    const r = await fetch(site.pkg);
+    if (!r.ok) throw new Error(`${site.pkg}: HTTP ${r.status}`);
     const pkg = new Uint8Array(await r.arrayBuffer());
-    if (productOf(pkg) !== meta.product) throw new Error("the firmware file is not the expected one");
-    image = logicalImage(pkg);
-    r = await fetch(meta.data2);
-    if (!r.ok) throw new Error(`${meta.data2}: HTTP ${r.status}`);
-    data2 = new Uint8Array(await r.arrayBuffer());
-    if (data2.length !== meta.data2_len || crc16(data2) !== meta.data2_crc16) throw new Error("the game data file is damaged");
-    say(force ? "Ready. Test mode: the game data will be rewritten even if it is already there." : "Ready.");
-    $("go").disabled = false;
-  } catch (e) { say("Could not load the files: " + e.message + ". Reload the page."); }
+    if (productOf(pkg) !== site.fw.product || await sha256hex(pkg) !== site.pkg_sha256) throw new Error("the firmware file is not the expected one");
+    base = pkg;
+    gate();
+  } catch (e) { say("Could not load the firmware: " + e.message + ". Reload the page."); }
 })();
 
 $("go").addEventListener("click", async () => {
-  if (writing) return;
-  writing = true; $("go").disabled = true; reset();
+  if (writing || !image) return;
+  writing = true; gate(); reset();
   let midi;
   try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
-  catch (e) { say("MIDI access was not allowed. Allow MIDI for this site in the address bar, then press Install again."); writing = false; $("go").disabled = false; return; }
+  catch (e) { writing = false; gate(); say("MIDI access was not allowed. Allow MIDI for this site in the address bar, then press Install again."); return; }
   try {
     const up = new Updater(midi, () => {});
     // the bar: stage 1 to 4 %, stage 2 to 60 %, stage 3 to 97 %, 100 % when the game answers
@@ -187,7 +374,7 @@ $("go").addEventListener("click", async () => {
       if (dev.id.text === meta.product) have = mine(await ask(dev.link, QUERY));   // only our own firmware is asked
       dev.link.close();
       stage(1, "done"); stage(2, "now"); bar(0.04);
-      if (have) { log("this firmware build is already installed: stage 2 skipped"); stage(2, "done", "already installed"); }
+      if (have) { log("this firmware build and this game data's first block are already installed: stage 2 skipped"); stage(2, "done", "already installed"); }
       else { await up.install(image, meta.product, step); stage(2, "done"); }
     }
     bar(0.6); stage(3, "now");
@@ -226,11 +413,12 @@ $("go").addEventListener("click", async () => {
                 noloader: "The FM-1 did not appear in update mode. Replug the USB cable and press Install again; it stays in update mode until the update is finished.",
                 noreturn: "The FM-1 did not come back. Switch it off and on, then press Install again.",
                 mismatch: "The firmware was written, but the FM-1 reports another version: " + (e && e.detail || "") };
-    say(e && e.shown ? e.message : e && e.code && T[e.code] ? T[e.code] : "Something went wrong: " + (e && e.message));
+    const msg = e && e.shown ? e.message : e && e.code && T[e.code] ? T[e.code] : "Something went wrong: " + (e && e.message);
     log(String(e && e.stack || e));
     if (current) stage(current, "fail");
     $("bar").className = "fill fail";
+    say(msg);
   }
-  writing = false; $("go").disabled = false;
+  writing = false; gate(true);
 });
 </script></main></body></html>

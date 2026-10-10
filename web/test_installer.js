@@ -1,13 +1,17 @@
-// Headless test of the one-button installer page (web/installer.html as built by web/make_installer.py) against a
-// model of the Doom firmware's side of the protocol (firmware/doom_dev.c: handshake, cmd 0x44, read requests).
-// Step 1 (the standard firmware update) is Felucca's code and is not modelled: every scenario starts with the
-// firmware already on the device.     node web/test_installer.js SITE_DIR
+// Headless test of the installer page (web/installer.html as built by web/make_installer.py): the data step
+// (the page cuts and converts a WAD itself, with the real converter) and the install flow against a model of the
+// Doom firmware's side of the protocol (firmware/doom_dev.c: handshake, cmd 0x44, read requests).
+// Step 1 of the install (the standard firmware update) is Felucca's code and is not modelled: every install
+// scenario starts with the firmware already on the device.
+//     node web/test_installer.js SITE_DIR [DOOM1.WAD]        (default WAD: wads/doom1.wad)
 const fs = require('fs'), path = require('path'), vm = require('vm');
-const site = process.argv[2];
+const site = path.resolve(process.argv[2]);
+const wadPath = process.argv[3] || path.join(__dirname, '..', 'wads', 'doom1.wad');
 const html = fs.readFileSync(path.join(site, 'index.html'), 'utf8');
 const script = /<script>([\s\S]*)<\/script>/.exec(html)[1];
-const meta = JSON.parse(/const meta = (\{.*?\});/.exec(script)[1]);
-const data2 = fs.readFileSync(path.join(site, meta.data2));
+const siteMeta = JSON.parse(/const site = (\{.*?\});\n/.exec(script)[1]);
+const WhdGen = require(path.join(site, 'whd_gen.js'));
+let meta = null, data2 = null;          // what the page prepared (the same for every scenario: one WAD)
 
 const pack7 = (data) => { const out = []; let acc = 0, nb = 0; for (const b of data) { acc |= b << nb; nb += 8; while (nb >= 7) { out.push(acc & 0x7F); acc >>>= 7; nb -= 7; } } if (nb) out.push(acc & 0x7F); return out; };
 const unpack7 = (s) => { const out = []; let acc = 0, nb = 0; for (const b of s) { acc |= (b & 0x7F) << nb; nb += 7; while (nb >= 8) { out.push(acc & 0xFF); acc >>>= 8; nb -= 8; } } return out; };
@@ -18,7 +22,8 @@ const rd32 = (u, i) => (u[i] | (u[i + 1] << 8) | (u[i + 2] << 16) | (u[i + 3] <<
 const msg = (cmd, body) => { let s = 0; for (const b of body) s += b; return [0xF0, ...pack7([0, 0x59, cmd, body.length & 255, body.length >> 8, 0, ...body, ~s & 255]), 0xF7]; };
 
 class DoomDev {                       // mode: 0 game, 4 safe (second block missing), 2 safe (HOME held)
-  constructor(o) { Object.assign(this, { mode: 4, build: meta.build, total: meta.total, split: meta.split, crc2: meta.data2_crc16, stopAt: -1, got: null, flags: [], log: [] }, o); }
+  constructor(o) { Object.assign(this, { mode: 4, stopAt: -1, got: null, flags: [], log: [] }, o); }
+  adopt(m) { for (const [k, v] of Object.entries({ build: m.build, total: m.total, split: m.split, crc2: m.data2_crc16 })) if (this[k] === undefined) this[k] = v; }
   attach(emit) { this.emit = (bytes) => setTimeout(() => emit(bytes), 1); }
   recv(bytes) {
     if (bytes[0] !== 0xF0) return;
@@ -60,29 +65,117 @@ class DoomDev {                       // mode: 0 game, 4 safe (second block miss
   }
 }
 
-async function run(name, dev, search, expect) {
-  const els = {}, el = (id) => els[id] || (els[id] = { textContent: '', className: '', style: {}, value: 0, disabled: false, scrollTop: 0, addEventListener(t, f) { this['on' + t] = f; } });
+function page(search, dev) {
+  const els = {};
+  const mk = () => ({ textContent: '', className: '', style: {}, value: '', disabled: false, files: [], children: [],
+    classList: { add() {}, remove() {} }, addEventListener(t, f) { this['on' + t] = f; }, appendChild(c) { this.children.push(c); }, click() {} });
+  const el = (id) => els[id] || (els[id] = mk());
   const input = { name: 'Felucca', state: 'connected', open: async () => {}, onmidimessage: null };
-  const output = { name: 'Felucca', state: 'connected', open: async () => {}, send: (b) => dev.recv(Array.from(b)) };
-  dev.attach((bytes) => { if (input.onmidimessage) input.onmidimessage({ data: Uint8Array.from(bytes) }); });
-  const ctx = vm.createContext({ console, setTimeout, clearTimeout, Promise, URLSearchParams, TextEncoder, Uint8Array, JSON, Math, Date, Array, String, Error, Map, parseInt,
-    location: { search }, document: { getElementById: el }, window: { addEventListener() {} },
+  const output = { name: 'Felucca', state: 'connected', open: async () => {}, send: (b) => dev && dev.recv(Array.from(b)) };
+  if (dev) dev.attach((bytes) => { if (input.onmidimessage) input.onmidimessage({ data: Uint8Array.from(bytes) }); });
+  const window = { addEventListener() {} };
+  const ctx = vm.createContext({ console, setTimeout, clearTimeout, Promise, URLSearchParams, TextEncoder, Uint8Array, DataView, Set, RegExp, JSON, Math, Date, Array, String, Error, Map, Object, parseInt,
+    location: { search }, window, requestAnimationFrame: (f) => setTimeout(f, 0),
+    document: { getElementById: el, querySelectorAll: () => (els.bundled ? els.bundled.children : []), createElement: mk,
+      head: { appendChild(s) { setTimeout(() => { window.WhdGen = WhdGen; s.onload(); }, 0); } } },
     navigator: { requestMIDIAccess: async () => ({ inputs: new Map([['i', input]]), outputs: new Map([['o', output]]) }) },
     fetch: async (f) => { const b = fs.readFileSync(path.join(site, f)); return { ok: true, status: 200, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.length) }; },
     crypto: globalThis.crypto });
   vm.runInContext(script, ctx);
-  await new Promise((r) => setTimeout(r, 300));
+  const until = async (f, ms) => { for (const end = Date.now() + ms; Date.now() < end;) { if (f()) return true; await new Promise((r) => setTimeout(r, 20)); } return false; };
+  const pick = async (name, bytes) => {
+    el('file').files = [{ name, size: bytes.length, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) }];
+    el('file').onchange();
+    await until(() => /\b(ok|warn|fail)\b/.test(el('res').className), 30000);
+    return { state: el('res').className.replace('result show', '').trim(), title: el('rest').textContent, more: el('resm').textContent, go: !el('go').disabled };
+  };
+  return { el, ctx, until, pick };
+}
+
+async function check(name, f) {
+  let ok = false, note = '';
+  try { [ok, note] = await f(); } catch (e) { note = String(e && e.stack || e); }
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}\n          ${note}`);
+  return ok;
+}
+
+async function run(name, dev, search, expect) {
+  const p = page(search, dev), el = p.el;
+  await p.until(() => /Choose the game file/.test(el('say').textContent), 3000);
+  const r = await p.pick('DOOM1.WAD', wad);
+  dev.adopt(vm.runInContext('meta', p.ctx));
   const ready = el('say').textContent;
   await el('go').onclick();
   const said = el('say').textContent, st = [1, 2, 3, 4].map((n) => el('st' + n).className.replace('stage', '').trim() || '-').join(' ');
-  const ok = expect(said, dev, ready, st, el('bar').style.width);
+  const ok = r.state === 'ok' && expect(said, dev, ready, st, el('bar').style.width);
   console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}\n          page: "${said}"  stages: ${st}  bar: ${el('bar').style.width}  log lines: ${el('log').textContent.split(String.fromCharCode(10)).length - 1}`);
   if (!ok) console.log(el('log').textContent.split('\n').slice(-12).join('\n'));
   return ok;
 }
 
+const wad = fs.readFileSync(wadPath);
 (async () => {
   let all = true;
+  // ---- the data step
+  all &= await check('before a file is chosen: Install is off and the page says what to do', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    return [p.el('go').disabled === true && /Choose the game file/.test(p.el('say').textContent), `page: "${p.el('say').textContent}"`];
+  });
+  all &= await check('the shareware WAD: prepared in the page, recognised, equal to what firmware/pack.py made', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const r = await p.pick('DOOM1.WAD', wad);
+    meta = JSON.parse(JSON.stringify(vm.runInContext('meta', p.ctx))); data2 = Buffer.from(vm.runInContext('data2', p.ctx));
+    const image = Buffer.from(vm.runInContext('image', p.ctx));
+    const B = path.join(__dirname, '..', 'firmware', 'build'), want = JSON.parse(fs.readFileSync(path.join(B, 'doom_install.json'), 'utf8'));
+    const part1 = fs.readFileSync(path.join(B, 'doom_part1.fwsc')), logical = Buffer.concat([...Array(20).keys()].map((i) => part1.subarray(i * 48, i * 48 + 47)).concat([part1.subarray(960)]));
+    const same = image.equals(logical) && data2.equals(fs.readFileSync(path.join(B, 'doom_data2.bin'))) &&
+      ['product', 'build', 'split', 'total', 'data2_len', 'data2_crc16'].every((k) => meta[k] === want[k]);
+    return [r.state === 'ok' && /shareware 1\.9/.test(r.title) && /tested on an FM-1/.test(r.more) && r.go && same, `"${r.title}" / "${r.more}"  identical to pack.py's package and block 2: ${same}`];
+  });
+  all &= await check('the same WAD with one sound changed: prepared, but flagged as untested', async () => {
+    const p = page('', null), mod = Buffer.from(wad);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const dir = mod.readUInt32LE(8), n = mod.readUInt32LE(4);
+    for (let i = 0; i < n; i++) if (mod.toString('latin1', dir + 16 * i + 8, dir + 16 * i + 16).replace(/\0+$/, '') === 'DSPISTOL') mod[mod.readUInt32LE(dir + 16 * i) + 100] ^= 0x20;
+    const r = await p.pick('mine.wad', mod);
+    return [r.state === 'warn' && /mine\.wad/.test(r.title) && /not the shareware 1\.9 file/.test(r.more) && r.go, `"${r.title}" / "${r.more.slice(0, 90)}..."`];
+  });
+  all &= await check('a file that is no WAD: refused, Install stays off', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const r = await p.pick('holiday.jpg', Buffer.from('this is not a wad at all, just some text'));
+    return [r.state === 'fail' && /Can't use holiday\.jpg/.test(r.title) && /not a Doom WAD/.test(r.more) && !r.go, `"${r.title}" / "${r.more}"`];
+  });
+  all &= await check('an add-on WAD (PWAD): refused with the reason', async () => {
+    const p = page('', null), pw = Buffer.from(wad.subarray(0, 4096)); pw.write('PWAD', 0, 'latin1');
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const r = await p.pick('addon.wad', pw);
+    return [r.state === 'fail' && /add-on/.test(r.more) && !r.go, `"${r.title}" / "${r.more}"`];
+  });
+  all &= await check('a WAD cut short: refused', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const r = await p.pick('DOOM1.WAD', wad.subarray(0, wad.length - 5000));
+    return [r.state === 'fail' && /damaged|cut short/.test(r.more) && !r.go, `"${r.title}" / "${r.more}"`];
+  });
+  const fd = path.join(__dirname, '..', 'wads', 'freedoom-0.13.0', 'freedoom1.wad');
+  if (fs.existsSync(fd)) all &= await check('Freedoom Phase 1: refused, and the page says why', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    const r = await p.pick('freedoom1.wad', fs.readFileSync(fd));
+    return [r.state === 'fail' && /This is Freedoom/.test(r.more) && !r.go, `"${r.title}" / "${r.more}"`];
+  });
+  if (siteMeta.bundled.length) all &= await check('the bundled data button: prepared without a WAD', async () => {
+    const p = page('', null);
+    await p.until(() => /Choose the game file/.test(p.el('say').textContent), 3000);
+    p.el('bundled').children[0].onclick();
+    await p.until(() => /\b(ok|fail)\b/.test(p.el('res').className), 5000);
+    return [/\bok\b/.test(p.el('res').className) && !p.el('go').disabled, `"${p.el('rest').textContent}"`];
+  });
+  if (!meta) { console.log('INSTALLER PAGE TEST FAILED (no data prepared)'); process.exit(1); }
+  // ---- the install flow
   all &= await run('safe mode, second block missing: the page sends it and the game starts', new DoomDev({ mode: 4 }), '',
     (said, d, r, st, w) => /^Done/.test(said) && d.finished && d.got.equals(data2) && d.mode === 0 && d.flags.join() === '2,2,0,2' && st === 'done done done done' && w === '100%');
   all &= await run('the game already running this build: nothing to do, nothing sent', new DoomDev({ mode: 0 }), '',

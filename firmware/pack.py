@@ -228,7 +228,9 @@ def main():
     (OUT / "doom_data2.bin").write_bytes(block2)
     (OUT / "doom_install.json").write_text(json.dumps({
         "product": PRODUCT, "core": core, "build": build, "split": split, "total": len(whx),
-        "data2_len": len(block2), "data2_crc16": pk.crc16(block2)}, indent=1) + "\n")
+        "data2_len": len(block2), "data2_crc16": pk.crc16(block2),
+        # for a page that packs the user's own game data in the browser (web/datapack.js) onto doom_code.fwsc
+        "img_len": len(img), "desc_at": desc_at, "app_slot": pk.APP_SLOT}, indent=1) + "\n")
     print(f"doom_part1.fwsc  {len(p1)} B   Felucca layout, Felucca loader, data block 1; writes nothing above {APP_AREA_END:#x}")
     print(f"doom_full.fwsc   {len(p2)} B   the same app area + data block 2; loader variant ({len(ext_ota)} B)")
     print("NOT TESTED ON HARDWARE - do not install without review")
