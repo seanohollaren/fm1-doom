@@ -55,8 +55,8 @@
 .controls__group.g-menu {
   --g: var(--g-menu);
 }
-.controls__group.g-view {
-  --g: var(--g-view);
+.controls__group.g-volume {
+  --g: var(--g-volume);
 }
 .controls__group.g-filter {
   --g: var(--g-filter);

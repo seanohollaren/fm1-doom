@@ -123,10 +123,9 @@
   stroke: var(--g-menu);
 }
 
-.device--controls .dv-btn.is-view rect,
-.device--controls .dv-knob.is-view .dv-knob__cap {
-  fill: var(--g-view);
-  stroke: var(--g-view);
+.device--controls .dv-knob.is-volume .dv-knob__cap {
+  fill: var(--g-volume);
+  stroke: var(--g-volume);
 }
 
 .device--controls .dv-btn.is-filter rect,
