@@ -30,5 +30,7 @@ run "loader variant, long package: doom_full again" $T/doom_ldr_test $B/doom_ful
 run "full Doom installed -> Felucca, Felucca's loader [Felucca's test]" $T/ldr_test $B/doom_full.fwsc $F
 $CC -Wextra -o $T/data_test firmware/tests/data_test.c            # the second data block written by our own firmware
 run "data block 2 over USB: firmware/dev_data.h against a simulated flash and host" $T/data_test
+$CC -Wextra -o $T/volume_test firmware/tests/volume_test.c        # the MASTER knob as the game's volume
+run "volume: firmware/dev_volume.h" $T/volume_test
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

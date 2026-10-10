@@ -6,4 +6,5 @@ set -e
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.docker/bin:$PATH"
 TC="${JIELI_TOOLCHAIN:-$HOME/.jieli/toolchain}"
+python3 firmware/gen_usb.py          # Felucca's usb.c with this firmware's own USB names -> firmware/build/gen/usb.c
 exec docker run --rm --platform linux/amd64 -v "$PWD":/p -v "$TC":/opt/jieli:ro -e FORCE="$FORCE" debian:bookworm-slim sh /p/firmware/build_in.sh

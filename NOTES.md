@@ -1435,3 +1435,36 @@ level's own textures, flats, sprites, sounds and music; scratch script, native `
 - QUEUED for the next firmware build (not done; no firmware was rebuilt): the firmware still names itself
   "Felucca" on USB (Felucca's `usb.c`, string descriptor `STR2`, unmodified). That name is Hügelton Instruments'.
   Rename to "FM-1 Doom"; Felucca's and our installer both find ports by `/fm-1|felucca|…/`, so either keeps working.
+
+## 2026-10-09 ~22:00 — Build "b6": the MASTER knob is the volume; the firmware names itself on USB (built and Mac-tested; NOT installed)
+
+Sean asked for both: a name that is not Felucca's, and the real volume knob.
+
+- VERIFIED from Felucca's source: MASTER is not an encoder but an analogue input, SARADC channel 4 on PB6
+  (`hal/fm1_adc.h`, `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023, a bounded wait, -1 on timeout). Felucca polls it from
+  its main loop once per screen frame, smooths it by an eighth per poll and maps it by a square law to a Q12 gain
+  (`master.c`, `fx.c master_of_pot`).
+- `firmware/dev_volume.h` (new, 14 host checks in `tests/volume_test.c`): the same mapping. `doom_dev.c` reads the
+  knob once before the audio starts (no glide: the first sound is at the knob's level), then once per game tic
+  from `dev_service`, **in game mode only**; the audio interrupt multiplies by the gain it finds. Full knob is
+  the old "100 %" (the mix shifted up 7 bits); the old fixed 5 % is the knob at about 22 %; the bottom of the
+  knob (readings 0..15) is silence. Safe mode reads no knob and makes no sound, as before.
+- VERIFIED in the disassembly: the audio loop is b5's with the constant 1638 replaced by the word at
+  `dev_gain_q12` and the shift 8 by 5 (same signed multiply, same arithmetic shift).
+- USB names. Felucca's `usb.c` reports manufacturer "Hügelton Instruments" and product "Felucca"; our firmware
+  compiled that file as it stood, so it claimed both. `firmware/gen_usb.py` (run by `build.sh`) now writes
+  `build/gen/usb.c`: Felucca's file with exactly those two string descriptors replaced (it refuses if either is
+  not found exactly once), and `build_in.sh` puts it first on the include path. Manufacturer "Deadlock
+  Interactive", product "FM-1 Doom". VERIFIED in the image: each new name once as a USB string, the old ones
+  not at all. The product name keeps "FM-1" in it because Felucca's and our installers pick MIDI ports by
+  `/fm-1|felucca|ota|…/`. During an update the device still shows as "Felucca Update": that is Felucca's own
+  loader, unmodified, under its own name.
+- b6: firmware 267,048 B (+240 B), recovery core id `c7618ad75e6ba239` (changed: the device unit changed), build
+  id `b5fbbf3a`; `doom_part1.fwsc` SHA-256 `b2ed37e8…6185b646`, `doom_code.fwsc` `fcd9fd37…757112c2`; data block 2
+  unchanged (`e4dcdbba…`, what the FM-1 holds). Block 1 has 19,416 B spare.
+- Checks: 17 package runs pass (`firmware/test.sh`, now with the volume test); the predicted flash after
+  installing b6 over b5 (138 of 143 app sectors change, nothing else) passes `check_dump.py` with the official
+  head. Symbols: `firmware/installed_b2ed37e8/`.
+- NOT VERIFIED until it runs on the FM-1: that the knob's direction and range feel right (the mapping is
+  Felucca's, so it should match the synth), that full volume does not distort on the speaker, and how the Mac
+  names the MIDI port after the change (it may keep showing the old name for a while).
