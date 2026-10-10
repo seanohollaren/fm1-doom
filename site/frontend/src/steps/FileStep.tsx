@@ -1,6 +1,5 @@
 import { useRef, useState, type DragEvent } from 'react'
 import type { Installer } from '../lib/useInstaller'
-import { site } from '../site'
 import { Notice, StepShell } from './StepShell'
 
 const kb = (n: number) => `${Math.round(n / 1024).toLocaleString('en')} KB`
@@ -23,7 +22,7 @@ export function FileStep({ inst, announce }: { inst: Installer; announce: boolea
   return (
     <StepShell
       index={1}
-      title="Get the game file"
+      title="Grab Doom"
       announce={announce}
       back={() => go(0)}
       next={
@@ -33,15 +32,14 @@ export function FileStep({ inst, announce }: { inst: Installer; announce: boolea
       }
     >
       <p className="lead">
-        Doom’s engine is free software. Its levels, pictures and sounds are not, so this site doesn’t host them. The page can fetch id
-        Software’s free shareware release for you, or take your own copy. Either way it is cut down to the first level and packed here, in
-        your browser.
+        Since I can’t host the Doom wad, click this button to load it from Archive.org. Then it’ll be automatically slimmed down to fit on the
+        FM‑1, leaving the complete first level. You can also supply your own doom.wad if you have it.
       </p>
 
       <div className="fetch">
         <div className="fetch__text">
           <strong>Fetch the shareware game</strong>
-          <span>DOOM1.WAD, version 1.9, 4.2 MB, straight from the Internet Archive. The page checks that it is the exact file.</span>
+          <span>This downloads DOOM1.WAD from Archive.org</span>
         </div>
         <button type="button" className={`btn${file.status === 'ready' ? '' : ' btn--primary'}`} disabled={working || !state.base} onClick={() => void fetchFile()}>
           Fetch it
@@ -62,7 +60,6 @@ export function FileStep({ inst, announce }: { inst: Installer; announce: boolea
         </svg>
         <div className="drop__text">
           <strong>Or drop your own DOOM1.WAD here</strong>
-          <span>It stays on this computer. Nothing is uploaded.</span>
         </div>
         <button type="button" className="btn" disabled={working || !state.base} onClick={() => input.current?.click()}>
           Choose file
@@ -98,10 +95,7 @@ export function FileStep({ inst, announce }: { inst: Installer; announce: boolea
         </Notice>
       )}
       {file.status === 'ready' && file.prepared.known && (
-        <Notice tone="ok" title="Ready: Doom shareware 1.9, level E1M1">
-          {kb(file.prepared.dataBytes)} of game data; about {kb(file.prepared.capacityBytes)} fit. This is exactly the data that has been
-          tested on an FM-1.
-        </Notice>
+        <Notice tone="ok" title="Ready: Doom shareware 1.9" />
       )}
       {file.status === 'ready' && !file.prepared.known && (
         <Notice tone="warn" title={`Ready: level E1M1 from ${file.prepared.fileName}`}>
@@ -120,20 +114,6 @@ export function FileStep({ inst, announce }: { inst: Installer; announce: boolea
           {file.message} The shareware DOOM1.WAD, version 1.9, is the file this was made for.
         </Notice>
       )}
-
-      <h3 className="sub">About the file</h3>
-      <p className="quiet">
-        <strong>DOOM1.WAD</strong> is the shareware release of Doom that id Software gave away:{' '}
-        <a href={site.wadHelpUrl} target="_blank" rel="noopener noreferrer">
-          more about it
-        </a>
-        . Fetching it downloads the file from{' '}
-        <a href={site.sharewareItemUrl} target="_blank" rel="noopener noreferrer">
-          its page on the Internet Archive
-        </a>{' '}
-        to this browser; this site never holds a copy. Of your own files, DOOM.WAD from the full game should work too, though only the
-        shareware file has been tested. Doom II and Freedoom don’t fit.
-      </p>
     </StepShell>
   )
 }

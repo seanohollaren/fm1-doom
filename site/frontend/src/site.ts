@@ -11,10 +11,6 @@ export const site = {
     'https://cors.archive.org/cors/doom-shareware_1996/DOOM1.WAD',
     'https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/f412706f9fe89b9ed8b888b5ea4e56db9db78ebd/doom1.wad',
   ],
-  /** the first mirror's own page, for a visitor who wants to see where the file comes from */
-  sharewareItemUrl: 'https://archive.org/details/doom-shareware_1996',
-  /** where a visitor can read about the shareware game file */
-  wadHelpUrl: 'https://doomwiki.org/wiki/DOOM1.WAD',
   feluccaInstallerUrl: 'https://hugelton.github.io/Felucca/',
   /** what a player should know about the build the page installs; edit with every firmware release */
   buildNotes: [

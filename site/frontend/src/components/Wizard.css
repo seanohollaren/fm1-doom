@@ -294,11 +294,6 @@
   font-weight: 600;
 }
 
-.drop__text span {
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-}
-
 /* ---- numbered things to do ---- */
 .todo {
   display: grid;
