@@ -15,7 +15,7 @@ To update the series after new commits on `fm1-port`:
 
 ```bash
 rm engine/rp2040-doom/*.patch
-git -C rp2040-doom format-patch --zero-commit --no-signature -o "$PWD/engine/rp2040-doom" 29a453c..fm1-port
+git -C rp2040-doom format-patch -N --zero-commit --no-signature -o "$PWD/engine/rp2040-doom" 29a453c..fm1-port
 ```
 
 No game data is in the series, and none may be added: `src/tiny.whd.h` (the embedded data of a host or browser

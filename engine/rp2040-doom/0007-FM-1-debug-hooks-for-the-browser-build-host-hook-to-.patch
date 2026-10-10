@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Sean O'Hollaren <sean.ohollaren@gmail.com>
 Date: Thu, 8 Oct 2026 00:13:10 -0700
-Subject: [PATCH 07/12] FM-1: debug hooks for the browser build; host hook to
- place the player
+Subject: [PATCH] FM-1: debug hooks for the browser build; host hook to place
+ the player
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
