@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 15:31:47 -0700
+Subject: [PATCH] FM-1: move with the six lowest keys, one key each for fire
+ and use; no screen link speed button
+
+The three low black keys are turn left, forward, turn right (F#3 G#3 A#3); the white keys under
+them strafe left, back, strafe right (F3 G3 A3). B3 and C4 do nothing now, and the low F# no
+longer runs (the high F# still does). Fire is F5 (and REC), use is G5: E5 and D5, which doubled
+them, do nothing. LFO no longer steps the screen link's clock: the game keeps the fastest rate.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |  2 --
+ src/fm1/fm1_controls.c | 24 +++++++++---------------
+ src/fm1/fm1_web.c      |  1 -
+ 3 files changed, 9 insertions(+), 18 deletions(-)
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index fbbd432..fcfbd25 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -43,5 +43,3 @@ extern uint32_t fm1_frames;
+ // picture shape on the square panel (fm1_video.c): 240x150 (square pixels), 240x180 (4:3), 240x240 (stretched)
+ void fm1_view_next(void);
+ const char *fm1_view_name(void);
+-// screen link: step to the next clock rate; returns it in MHz, or 0 where the rate cannot be changed
+-int fm1_lcd_speed_next(void);
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index fe3143e..9e72547 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -3,12 +3,13 @@
+ // The platform reports the panel as Felucca's HAL does (bit n of notes = key n, bit n of buttons = the button
+ // with that printed label, encoder steps since the last poll, + = clockwise); this file owns the layout.
+ //
+-//   left hand, around the low A:      G#3 / A#3 forward     F#3 run
+-//                                 G3 turn left   A3 back   B3 turn right        F3 / C4 strafe left / right
+-//   right hand, top of the keyboard:  E5 / F5 fire          D5 / G5 use (open doors)   F#5 run
++//   left hand, bottom of the keyboard, as W A S D on a PC with the turns either side of forward:
++//                                    F#3 turn left   G#3 forward   A#3 turn right
++//                                 F3 strafe left   G3 back   A3 strafe right
++//   right hand, top of the keyboard:  F5 fire   G5 use (open doors)   F#5 run
+ //   buttons:  HOME menu (Esc)   PLAY select (Enter)   REC fire   OCT- / OCT+ previous / next weapon   FX yes
+-//             SCL next picture shape   LFO next screen link speed   ENV show the frame rate
+-//             (the last three answer with a line on the game's message display, so only while a level is up)
++//             SCL next picture shape   ENV show the frame rate
++//             (the last two answer with a line on the game's message display, so only while a level is up)
+ //   knobs:    SELECT moves through menus (weapons while playing)   KNOB 4 previous / next weapon
+ //   the synth's own trick, a filter over everything the game plays (fm1_filter.h):
+ //             KNOB 1 sweeps it: left of centre a low-pass closing down, right of centre a high-pass opening up
+@@ -50,9 +51,9 @@ static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n <
+ typedef struct { uint8_t src; uint8_t key; } fm1_map_t;       /* src: 0..26 note key, 32 + label = button */
+ #define BTN(label) (32 + (label))
+ static const fm1_map_t FM1_MAP[] = {
+-    {3, KEY_UPARROW}, {5, KEY_UPARROW}, {2, KEY_LEFTARROW}, {4, KEY_DOWNARROW}, {6, KEY_RIGHTARROW},
+-    {0, ','}, {7, '.'}, {1, KEY_RSHIFT}, {25, KEY_RSHIFT},
+-    {23, KEY_RCTRL}, {24, KEY_RCTRL}, {21, ' '}, {26, ' '},
++    {1, KEY_LEFTARROW}, {3, KEY_UPARROW}, {5, KEY_RIGHTARROW},
++    {0, ','}, {2, KEY_DOWNARROW}, {4, '.'},
++    {24, KEY_RCTRL}, {25, KEY_RSHIFT}, {26, ' '},
+     {BTN(FM1_BTN_HOME), KEY_ESCAPE}, {BTN(FM1_BTN_PLAY), KEY_ENTER}, {BTN(FM1_BTN_REC), KEY_RCTRL},
+     {BTN(FM1_BTN_OCTDN), FM1_KEY_PREVWEAPON}, {BTN(FM1_BTN_OCTUP), FM1_KEY_NEXTWEAPON}, {BTN(FM1_BTN_FX), 'y'},
+ };
+@@ -99,13 +100,6 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_view_next();
+         fm1_say(fm1_view_name(), -1, "");
+     }
+-    if (pressed & (1u << FM1_BTN_LFO)) {
+-        int mhz = fm1_lcd_speed_next();
+-        if (mhz)
+-            fm1_say("SCREEN LINK ", mhz, " MHZ");
+-        else
+-            fm1_say("SCREEN LINK IS FIXED HERE", -1, "");
+-    }
+     if (pressed & (1u << FM1_BTN_ENV))
+         fm1_say("", (int)fps, " FRAMES A SECOND");
+     for (unsigned i = 0; i < FM1_NMAP; i++) {
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index a8ed35e..b2666f7 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -56,7 +56,6 @@ static void fm1_web_split(void)
+     fm1_part2 = malloc(total - best);
+     memcpy(fm1_part2, tiny_whd + best, total - best);
+ }
+-int fm1_lcd_speed_next(void) { return 0; }
+ const uint8_t *fm1_whd_base(void) { fm1_web_split(); return fm1_part1; }
+ const uint8_t *fm1_whd_part2(uint32_t *split) { fm1_web_split(); *split = fm1_split; return fm1_part2; }
+ void fm1_alive(void) {}
