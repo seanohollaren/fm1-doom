@@ -2,6 +2,17 @@
 export const site = {
   /** where the source of the firmware and of this page can be had (the GPL asks for it); empty hides the link */
   sourceUrl: '',
+  /**
+   * Where the page may download id Software's shareware DOOM1.WAD v1.9 from, in the visitor's browser, in this
+   * order. Each must allow cross-site requests; the page accepts only the exact file (size and SHA-256), whatever
+   * a mirror sends. Each host must also be in connect-src in ../../security-headers.json (a test checks).
+   */
+  sharewareMirrors: [
+    'https://cors.archive.org/cors/doom-shareware_1996/DOOM1.WAD',
+    'https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/f412706f9fe89b9ed8b888b5ea4e56db9db78ebd/doom1.wad',
+  ],
+  /** the first mirror's own page, for a visitor who wants to see where the file comes from */
+  sharewareItemUrl: 'https://archive.org/details/doom-shareware_1996',
   /** where a visitor can read about the shareware game file */
   wadHelpUrl: 'https://doomwiki.org/wiki/DOOM1.WAD',
   feluccaInstallerUrl: 'https://hugelton.github.io/Felucca/',

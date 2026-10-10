@@ -59,7 +59,7 @@ export function CheckStep({ inst, announce }: { inst: Installer; announce: boole
         </li>
         <li>
           <strong>The game file, DOOM1.WAD</strong>
-          <span>The free shareware release of Doom. The next step explains.</span>
+          <span>The free shareware release of Doom. The page can fetch it for you in the next step.</span>
         </li>
       </ul>
     </StepShell>

@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { install, probe, selfCheck } from '@fm1/install.js'
 import { firmware, loadFirmware, prepareWad } from './prepare'
+import { fetchShareware, SHAREWARE_BYTES } from './shareware'
+import { site } from '../site'
 import type { InstallEvent, Phase, Prepared, ProbeResult, StageState } from './types'
 
 export type FileState =
   | { status: 'idle' }
+  /** the page is downloading the shareware file itself */
+  | { status: 'fetching'; received: number; total: number }
   | { status: 'working'; name: string }
   | { status: 'ready'; prepared: Prepared }
-  | { status: 'failed'; name: string; message: string }
+  /** download: the page's own fetch of the shareware file failed (nothing wrong with any file of the visitor's) */
+  | { status: 'failed'; name: string; message: string; download?: boolean }
 
 export type ConnectState =
   | { status: 'idle' }
@@ -172,6 +177,8 @@ export function useInstaller() {
     }
   }, [busy])
 
+  const fileBusy = state.file.status === 'working' || state.file.status === 'fetching'
+
   const chooseFile = useCallback(
     async (file: File) => {
       if (!state.base || busy || state.file.status === 'working') return
@@ -188,6 +195,28 @@ export function useInstaller() {
     },
     [state.base, state.file.status, busy],
   )
+
+  // one click: download the shareware file from a mirror, check it is the exact file, then prepare it like any other
+  const fetchFile = useCallback(async () => {
+    if (!state.base || busy || fileBusy) return
+    dispatch({ type: 'file', file: { status: 'fetching', received: 0, total: SHAREWARE_BYTES } })
+    let last = 0
+    try {
+      const bytes = await fetchShareware(site.sharewareMirrors, (received) => {
+        // a few times a second is plenty for a bar
+        if (received === SHAREWARE_BYTES || received - last > 150_000) {
+          last = received
+          dispatch({ type: 'file', file: { status: 'fetching', received, total: SHAREWARE_BYTES } })
+        }
+      })
+      dispatch({ type: 'log', text: `downloaded the shareware DOOM1.WAD (${bytes.length} B, checksum as expected)` })
+      await chooseFile(new File([bytes as BlobPart], 'DOOM1.WAD'))
+    } catch (e) {
+      const err = e as Error & { detail?: string }
+      dispatch({ type: 'log', text: `download failed: ${err.detail ?? err.message}` })
+      dispatch({ type: 'file', file: { status: 'failed', name: 'DOOM1.WAD', message: err.message, download: true } })
+    }
+  }, [state.base, busy, fileBusy, chooseFile])
 
   const prepared = state.file.status === 'ready' ? state.file.prepared : null
 
@@ -247,7 +276,7 @@ export function useInstaller() {
   )
   const setAck = useCallback((ack: boolean) => dispatch({ type: 'ack', ack }), [])
 
-  return { state, firmware, prepared, busy, maxStep, go, chooseFile, setAck, connect, run }
+  return { state, firmware, prepared, busy, fileBusy, maxStep, go, chooseFile, fetchFile, setAck, connect, run }
 }
 
 export type Installer = ReturnType<typeof useInstaller>

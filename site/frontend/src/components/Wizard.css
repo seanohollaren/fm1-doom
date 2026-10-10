@@ -220,6 +220,46 @@
 }
 
 /* ---- step 2: the file ---- */
+.fetch {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius-lg);
+  background: var(--bg-inset);
+}
+
+.fetch__text {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.fetch__text strong {
+  font-weight: 600;
+}
+
+.fetch__text span {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.meter {
+  display: block;
+  height: 4px;
+  margin-top: 0.5rem;
+  background: var(--line);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--red-hot);
+  transition: width 0.2s linear;
+}
+
 .drop {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -438,7 +478,8 @@
   .needs li {
     grid-template-columns: 1fr;
   }
-  .drop {
+  .drop,
+  .fetch {
     grid-template-columns: 1fr;
     justify-items: start;
   }

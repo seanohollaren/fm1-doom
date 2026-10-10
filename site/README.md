@@ -4,8 +4,14 @@ A Vite + React page that installs Doom on an M-VAVE FM-1 from the browser, and t
 Same shape as `static-personal-site`: `frontend/` is built to static files, `infra/` (CDK) puts them in S3 behind
 CloudFront with a certificate and a Route 53 record, and a push to `main` deploys through GitHub Actions.
 
-The site holds **no game data**. The visitor picks their own `DOOM1.WAD`; the page cuts it down to one level,
+The site holds **no game data**. The page downloads id Software's shareware `DOOM1.WAD` (v1.9) from a public
+mirror into the visitor's browser when they press "Fetch it" (or takes their own copy), cuts it down to one level,
 converts it and packs it in the browser, then installs over USB-MIDI.
+
+The mirrors are in `frontend/src/site.ts` (`sharewareMirrors`): the Internet Archive's cross-site endpoint first,
+a pinned GitHub raw file second. The page accepts only the exact file (size and SHA-256), so a mirror can go
+away or go bad without harm: the visitor is told to use their own copy. Each mirror's host must also be in
+`connect-src` in `security-headers.json`; a test checks that.
 
 ## What is where
 

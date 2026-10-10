@@ -106,6 +106,10 @@ export function Footer() {
             {firmware.version} · firmware {hex(firmware.build)}
           </p>
           <p>
+            The shareware game file is id Software’s. This site holds no copy of it: the page downloads it from the Internet Archive when
+            you ask, or uses your own.
+          </p>
+          <p>
             DOOM is a trademark of id Software. This project is not affiliated with id Software, ZeniMax, M-VAVE or Hügelton Instruments.
           </p>
         </div>

@@ -1370,3 +1370,43 @@ Baud Girl's page, "nice and Doom appropriate".
   the `fm1-port` branch of rp2040-doom).
 - b5 is the build on the site and it still has the 5 % test volume; "going back through Felucca's installer"
   and an install started while the game runs are still unverified on the device.
+
+## 2026-10-09 ~20:50 — A second level does not fit; the site fetches the shareware WAD itself (Mac only)
+
+### Could E1M2 come along? No (VERIFIED by converting it)
+Sean asked whether the second level could be included. Cut the same way as E1M1 (single-player things only, each
+level's own textures, flats, sprites, sounds and music; scratch script, native `whd_gen`):
+
+| Levels | Game data |
+| --- | --- |
+| E1M1 | 606,720 B |
+| E1M2 alone | 769,644 B |
+| E1M1 + E1M2 | 830,428 B |
+| E1M1 + E1M3 | 887,344 B |
+| E1M1 + E1M2 + E1M3 | 1,014,484 B |
+
+- Room next to the b5 firmware: 630,044 B. E1M1 + E1M2 is 200 KB over, and E1M2 would not fit even by itself:
+  it is twice E1M1's size as a map (1,323 sidedefs against 648, 262 things against 138) and uses 64 wall
+  textures against 34.
+- Even taking every byte of the chip that could be taken (the 92 KB where the original firmware's presets,
+  Felucca's autosave and the settings live) gives about 722 KB: still 108 KB short, before asking whether the
+  bigger level fits in 512 KB of RAM (not measured).
+- Conclusion: one level, E1M1, on this chip with this engine.
+
+### One-click game file (built, tested in a browser; not deployed)
+- Sean chose the option of the page fetching the shareware WAD itself.
+- Mirrors found and checked (each streamed through `shasum`, nothing saved): both serve the exact v1.9 file,
+  SHA-256 `1d7d43be…26cac771`, 4,196,020 B, with cross-site access allowed.
+  1. `https://cors.archive.org/cors/doom-shareware_1996/DOOM1.WAD` (the Internet Archive's cross-site endpoint;
+     the plain `archive.org/download/…` address sends no such header, so a page cannot read it). Found by
+     searching the Archive's file lists for the file's MD5.
+  2. `https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/f412706f…/doom1.wad` (pinned to a commit).
+- `site/frontend/src/lib/shareware.ts`: tries the mirrors in order, without cookies or referrer, streams with
+  progress, and accepts only the exact size and SHA-256. Anything else from a mirror is refused and the next
+  is tried; if none works the visitor is told to use their own copy.
+- The Game file step now offers "Fetch it" first and "drop your own" second. `connect-src` in
+  `site/security-headers.json` lists the two hosts (a test keeps it in step with `site.ts`).
+- VERIFIED in the Browser pane, development server and a production build under the real security headers: the
+  page downloaded the file from the Internet Archive, verified, cut, converted and packed it in 4.2–4.6 s; the
+  result is the tested data. 32 tests pass.
+- This is the first time the page contacts another host, and only on that button.
