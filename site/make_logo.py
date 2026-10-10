@@ -23,8 +23,8 @@ SITE = Path(__file__).resolve().parent
 # w the widths of F, M, hyphen and 1, the gap, and the 1's flag; vp, depth where the sides run and how far;
 # rim the bright edge (of s); line the dark line inside it; split the jagged line's valleys and peaks (y);
 # teeth how many peaks; textured: brick and steel patterns and grain, or flat colours
-WIDE = dict(s=34, HO=128, SP=46, k=0.0016, w=(96, 128, 40, 58, 10, 22), vp=4.0, depth=0.07, rim=0.14, line=0.8, split=(62, 34), teeth=9, textured=True)
-NARROW = dict(s=26, HO=118, SP=34, k=0.0013, w=(46, 76, 19, 37, 5, 11), vp=4.0, depth=0.05, rim=0.16, line=0.8, split=(64, 36), teeth=4, textured=False)
+WIDE = dict(s=34, HO=128, SP=46, k=0.0004, w=(96, 128, 40, 58, 10, 22), vp=6.0, depth=0.022, rim=0.14, line=0.8, split=(62, 34), teeth=9, textured=True)
+NARROW = dict(s=26, HO=118, SP=34, k=0.0003, w=(46, 76, 19, 37, 5, 11), vp=6.0, depth=0.016, rim=0.16, line=0.8, split=(64, 36), teeth=4, textured=False)
 
 OUTLINE = "#140b05"
 GROUND = "#0b0a09"  # the page's ground (--bg), behind the tab icon
