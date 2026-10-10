@@ -1460,7 +1460,7 @@ Sean asked for both: a name that is not Felucca's, and the real volume knob.
   `/fm-1|felucca|ota|…/`. During an update the device still shows as "Felucca Update": that is Felucca's own
   loader, unmodified, under its own name.
 - b6: firmware 267,048 B (+240 B), recovery core id `c7618ad75e6ba239` (changed: the device unit changed), build
-  id `b5fbbf3a`; `doom_part1.fwsc` SHA-256 `b2ed37e8…6185b646`, `doom_code.fwsc` `fcd9fd37…757112c2`; data block 2
+  id `b5fc233a`; `doom_part1.fwsc` SHA-256 `b2ed37e8…6185b646`, `doom_code.fwsc` `fcd9fd37…757112c2`; data block 2
   unchanged (`e4dcdbba…`, what the FM-1 holds). Block 1 has 19,416 B spare.
 - Checks: 17 package runs pass (`firmware/test.sh`, now with the volume test); the predicted flash after
   installing b6 over b5 (138 of 143 app sectors change, nothing else) passes `check_dump.py` with the official

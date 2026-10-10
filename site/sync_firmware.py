@@ -16,6 +16,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,6 +35,11 @@ LICENCES = [
 
 def main(version):
     tag = re.sub(r"[^A-Za-z0-9.-]", "-", version)
+    # the commit the firmware was built from: the page links to it, so the source of the served binary can be found
+    git = lambda *a: subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True, check=True).stdout.strip()
+    if git("status", "--porcelain", "--", "firmware", "engine"):
+        raise SystemExit("sync_firmware: firmware/ or engine/ has uncommitted changes: commit them, then build, then sync")
+    commit = git("rev-parse", "HEAD")
     info = json.loads((BUILD / "doom_install.json").read_text())
     pkg = (BUILD / "doom_code.fwsc").read_bytes()
     for k in ("img_len", "desc_at", "app_slot"):
@@ -58,9 +64,10 @@ def main(version):
         "product": info["product"], "build": info["build"], "core": info["core"],
         "img_len": info["img_len"], "desc_at": info["desc_at"], "app_slot": info["app_slot"],
         "converter_sha256": hashlib.sha256((WHDGEN / "whd_gen_es.wasm").read_bytes()).hexdigest(),
+        "source_commit": commit,
     }
     (ROOT / "site" / "frontend" / "src" / "firmware.json").write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"site: firmware {version} ({len(pkg)} B package, image {info['img_len']} B, build {info['build']:08x}), "
+    print(f"site: firmware {version} ({len(pkg)} B package, image {info['img_len']} B, build {info['build']:08x}, source {commit[:7]}), "
           f"converter {(WHDGEN / 'whd_gen_es.wasm').stat().st_size} B, {len(LICENCES)} licence texts")
 
 

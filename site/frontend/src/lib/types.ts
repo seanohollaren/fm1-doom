@@ -12,6 +12,8 @@ export interface FirmwareMeta {
   desc_at: number
   app_slot: number
   converter_sha256: string
+  /** the commit of this repository the firmware was built from */
+  source_commit?: string
 }
 
 /** what is about to be installed: the firmware reports the same numbers once it holds this data */

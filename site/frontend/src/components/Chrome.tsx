@@ -104,6 +104,14 @@ export function Footer() {
           <p className="label">Build</p>
           <p className="mono">
             {firmware.version} · firmware {hex(firmware.build)}
+            {site.sourceUrl && firmware.source_commit && (
+              <>
+                {' · '}
+                <a href={`${site.sourceUrl}/tree/${firmware.source_commit}`} target="_blank" rel="noopener noreferrer">
+                  source {firmware.source_commit.slice(0, 7)}
+                </a>
+              </>
+            )}
           </p>
           <p>
             The shareware game file is id Software’s. This site holds no copy of it: the page downloads it from the Internet Archive when

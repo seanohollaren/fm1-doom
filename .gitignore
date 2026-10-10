@@ -37,6 +37,7 @@ tiny.whd.h
 node_modules/
 /site/frontend/dist/
 /site/frontend/dist-check/
+/site/frontend/dist-b6/
 /site/infra/cdk.out/
 /site/infra/**/*.js
 /site/infra/**/*.d.ts
