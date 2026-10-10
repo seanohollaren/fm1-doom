@@ -20,19 +20,16 @@ export function PrepareStep({ inst, announce }: { inst: Installer; announce: boo
       <ol className="todo">
         <li>
           <strong>Plug the FM-1 straight into this computer and switch it on.</strong>
-          <span>No hub: a hub can hide the FM-1 from the browser.</span>
         </li>
         <li>
           <strong>Close anything else that uses the FM-1.</strong>
-          <span>Music software, M-VAVE’s app and other installer tabs hold on to its connection.</span>
         </li>
         <li>
           <strong>Keep this tab in front, and the computer plugged in.</strong>
-          <span>Browsers slow a tab to a crawl when it is in the background. The page keeps the screen awake while it installs.</span>
         </li>
         <li>
-          <strong>Using Felucca? Save what you want to keep first.</strong>
-          <span>Its saved projects and samples sit where the game data goes, and the install overwrites them.</span>
+          <strong>Export anything you want to keep from your current firmware.</strong>
+          <span>Doom takes pretty much the entire storage space of the FM-1, though your presets should remain.</span>
         </li>
       </ol>
 
@@ -42,8 +39,7 @@ export function PrepareStep({ inst, announce }: { inst: Installer; announce: boo
       <label className="ack">
         <input type="checkbox" checked={state.ack} onChange={(e) => setAck(e.target.checked)} />
         <span>
-          I understand this replaces the synth firmware on my FM-1 with experimental software, tested on one unit, and that I use it at my
-          own risk.
+          I understand this replaces the synth firmware on my FM-1 with experimental software and I’m using it at my own risk.
         </span>
       </label>
     </StepShell>
