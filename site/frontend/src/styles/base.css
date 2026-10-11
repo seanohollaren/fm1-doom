@@ -163,6 +163,19 @@ code,
   box-shadow: 0 0 0 4px var(--red-wash);
 }
 
+/* a link that is one of the page's actions */
+a.btn {
+  text-decoration: none;
+}
+
+a.btn:hover {
+  color: var(--ink);
+}
+
+a.btn--primary:hover {
+  color: var(--on-red);
+}
+
 .btn--big {
   min-height: 3.6rem;
   padding-inline: 2.2rem;

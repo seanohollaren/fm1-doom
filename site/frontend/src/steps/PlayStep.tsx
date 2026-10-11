@@ -1,10 +1,19 @@
-import { Controls } from '../components/Controls'
 import type { Installer } from '../lib/useInstaller'
 import { Notice, StepShell } from './StepShell'
 
 export function PlayStep({ inst, announce }: { inst: Installer; announce: boolean }) {
   return (
-    <StepShell index={5} title="Play" announce={announce} back={() => inst.go(4)}>
+    <StepShell
+      index={5}
+      title="Play"
+      announce={announce}
+      back={() => inst.go(4)}
+      next={
+        <a className="btn btn--primary" href="#controls">
+          View controls
+        </a>
+      }
+    >
       <Notice tone="ok" title="Doom is running on your FM-1">
         You can unplug it now. It starts the game every time you switch it on.
       </Notice>
@@ -24,11 +33,8 @@ export function PlayStep({ inst, announce }: { inst: Installer; announce: boolea
         </li>
       </ol>
 
-      <h3 className="sub">Controls</h3>
-      <Controls />
-
       <p className="quiet">
-        The rest of the manual is further down this page: what the plain-colour screens mean, and how to put a synth firmware back.
+        The manual is further down this page: the controls, what the plain-colour screens mean, and how to put a synth firmware back.
       </p>
     </StepShell>
   )
