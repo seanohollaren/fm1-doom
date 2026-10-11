@@ -22,7 +22,7 @@ export const KEYS: Record<number, Group> = {
 
 /** buttons by their printed label (SCL and GLO also do something, picture shape and frame rate: left out on purpose) */
 export const BUTTONS: Record<string, Group> = {
-  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', EDIT: 'sound', ENV: 'sound',
+  HOME: 'menu', PLAY: 'menu', FX: 'menu', REC: 'fire', 'OCT−': 'weapon', 'OCT+': 'weapon', EDIT: 'sound', ENV: 'sound', LFO: 'sound',
 }
 
 export const KNOBS: Record<string, Group> = {
@@ -40,17 +40,18 @@ export const KEY_LABELS: Record<number, string[]> = {
 export const TIPS: Record<string, string> = {
   MASTER: 'Volume. Right down is silent.',
   SELECT: 'Previous and next weapon. With the menu open, moves through it.',
-  'KNOB 1': 'Filter sweep. Left muffles the sound, right thins it; the centre is off.',
-  'KNOB 2': 'Filter resonance: how hard the filter rings where it cuts.',
-  'KNOB 3': 'Pitch of the music, a semitone a click. After ENV: its notes from short to long.',
-  'KNOB 4': 'Tempo of the music, half speed to double. After ENV: filter wobble, slow to fast.',
+  'KNOB 1': 'Filter sweep; the centre is off. After ENV: attack. After LFO: how fast the filter wobbles.',
+  'KNOB 2': 'Filter resonance: how hard it rings where it cuts. After ENV: decay.',
+  'KNOB 3': 'Pitch of the music, a semitone a click. After ENV: sustain.',
+  'KNOB 4': 'Tempo of the music, half speed to double. After ENV: release.',
   PRESETS: 'Changes the instrument the music is played on. All the way left is as written.',
   ALGORITHM: 'FM depth: every instrument duller to the left, harsher to the right.',
   'OCT−': 'Previous weapon.',
   'OCT+': 'Next weapon.',
   FX: 'Answers yes when the game asks.',
   EDIT: 'Puts all of the sound back as it was.',
-  ENV: 'Gives KNOB 3 and KNOB 4 a second pair of jobs, envelope and wobble. Again: back.',
+  ENV: 'The four knobs become attack, decay, sustain and release for the music. Again: back.',
+  LFO: 'KNOB 1 becomes a wobble that swings the filter to and fro. Again: back.',
   HOME: 'Opens and closes the menu.',
   PLAY: 'Chooses in the menu.',
   REC: 'Fire.',
@@ -95,7 +96,8 @@ export const LEGEND: { group: Group; rows: { keys: string[]; what: string }[] }[
       { keys: ['ALGORITHM'], what: 'FM depth: every instrument duller to the left, harsher to the right' },
       { keys: ['KNOB 3'], what: 'Pitch of the music, a semitone a click, an octave each way' },
       { keys: ['KNOB 4'], what: 'Tempo of the music, half speed to double' },
-      { keys: ['ENV'], what: 'Gives KNOB 3 and KNOB 4 a second pair of jobs, and back: KNOB 3 makes the notes short or long, KNOB 4 makes the filter wobble' },
+      { keys: ['ENV'], what: 'The four knobs become the envelope of the music’s notes: attack, decay, sustain, release. Press it again to go back' },
+      { keys: ['LFO'], what: 'KNOB 1 becomes a wobble that swings the filter to and fro, slow to fast. Press it again to go back' },
       { keys: ['EDIT'], what: 'All of it as it was' },
     ],
   },
