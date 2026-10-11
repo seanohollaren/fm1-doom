@@ -1777,3 +1777,44 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
   `firmware/installed_a69f245d/`. Source commit `e658754`.
 - NOT VERIFIED until it runs on the FM-1: everything about how it sounds there; that KNOB 1 to KNOB 4 are the
   encoders in that order.
+
+## 2026-10-10 — Prototype: Doom's music on Felucca's six-operator FM engine (browser build only; nothing for the device yet)
+
+Sean: the game's instruments on PRESETS sound like "cheap mini sounds", Felucca's are "beefy and compelling";
+could those be heard in Doom? He agreed to a listening prototype in the browser build first.
+
+- **Licence** (my reading of Felucca's LICENSING.md, not legal advice): GPL-3.0-only covers Felucca's code "and
+  its own assets"; the FM6 factory patches are "Felucca's own"; the FM core (`fm6_core.c`) is msfa from Dexed,
+  Apache-2.0. Our firmware is already a GPL-3 derivative of Felucca with its source published, so using the
+  engine and patches is allowed on the same terms. "Felucca" and "Hügelton Instruments" are the author's names:
+  credit, not branding. Its CONTRIBUTING.md points forks and mods to Discussions > Show and tell.
+- **Why not just more presets**: a Felucca preset is parameters for one of Felucca's engines; the game's music is
+  played by an emulated two-operator chip (9 voices, GENMIDI instruments). The engine has to come along.
+- **What was built.** `firmware/fm1_fm6.c`: includes Felucca's `fm6_core.c` and its generated tables and factory
+  patches from the Felucca checkout, unchanged, and wraps them as a six-voice synth (Felucca's own cap for this
+  engine on the FM-1): note on / off by channel and key, the oldest released voice stolen first, one patch for
+  every channel, the DC blocker and output stage as Felucca's `eng_fm6.c`. It renders 32-sample blocks at the
+  44,100 Hz its tables are made for and is interpolated to the mixer's 49,716 Hz, so pitch and envelopes are
+  Felucca's. Engine hooks (patch 0020, all under `FM1_FM6`): `i_oplmusic.c` sends melodic note-ons and
+  note-offs there when a patch is chosen and leaves the chip the percussion; `fm1_audio.c` adds its sound to
+  each mixer pass; `fm1_controls.c` puts the eight patches on the PRESETS knob's first eight clicks
+  ("FELUCCA 1 TINE EP" .. "FELUCCA 8 NYLON PICK"), the game's 128 instruments after them. The pitch and tempo
+  knobs work on it; the FM depth knob is its modulators' level; the envelope knobs do not reach it yet.
+- `FM6=1 sh web/build.sh` builds it into `web/build-fm6` (preview entry `fm1-doom-fm6`, port 8798). The ordinary
+  browser build and the device firmware are built without the flag and are unchanged (their tests pass; b14 on
+  the site is still source commit `e658754`).
+- VERIFIED headless, `node web/test_fm6.js` (12 checks): on each of the eight patches the engine sounds the
+  melody (up to 6 voices) and the chip only drums; RMS 970 .. 1770 against 1700 for the game's own, no clipping,
+  no underruns; PRESETS 9 is the chip again; EDIT restores the game's music. A 64 s recording of the game's own
+  music and then each patch on E1M1: `web/build-fm6/doom-on-felucca-fm6.m4a` (not in git).
+- **Cost on the device, from Felucca's own test** (`Felucca/build/host/fm6_test`, run here): 34 to 179 host
+  instructions per sample and voice depending on the patch, which Felucca's measured ratio (1.7 % of the chip
+  per 100) puts at 0.6 % to 3.0 % a voice, about 18 % of the processor for six voices of the heaviest patch.
+  Size in Felucca's build: about 13.6 KB of flash and 9.4 KB of RAM for the engine with all four tracks; here
+  one patch and six voices need about 1.7 KB of RAM. Block 1 has 15.7 KB of flash spare; the large-buffer RAM
+  region is full, so its state would have to live in the other region (the game heap gives way).
+- NOT DONE, and what a device build would still need: the size checked in our build, the engine's state placed,
+  the frame rate with it measured on the FM-1 (Sean has not yet reported any frame rate), envelope knobs mapped
+  onto the patch, and the patch choice somewhere better than the first eight clicks if it stays.
+- ASSUMED: that Felucca's 1.7 % per 100 figure carries over to our firmware (same chip, same start-up code and
+  clock set-up from Felucca's HAL; not measured by us).
