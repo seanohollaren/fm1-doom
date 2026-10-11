@@ -2090,3 +2090,69 @@ objects' symbol tables); processor shares are ESTIMATES from Felucca's own figur
   Felucca, compared by ear with the takes Sean liked, and linked into the real firmware for exact sizes, with
   the heap's real use measured; (2) on the device: a test build with a frame-rate and audio-load readout, which
   Sean installs; the recovery core compared as before every build; (3) what ships, and the controls for it.
+
+## 2026-10-11 — Build "b15": the drum machine and three of Felucca's sounds in the firmware (built and Mac-tested; NOT installed)
+
+Sean, after the first figures: PULSE LD need not come if its engine is the deal breaker, and "We can skip the step
+where you put it all in the browser, let's just focus on shipping it to the device so I can test it for real."
+
+- **What b15 is:** b14 plus `firmware/fm1_sound.c`, one compilation unit (so Felucca's tables are in flash once):
+  - `fm1_drums.c`: the CRUNCH kit only (Felucca's own kit as designed, DRV 70 on each voice, DIST 30 on the kit,
+    the whole mix through Felucca's master limiter with the music going in at twice its level), the eight beats,
+    crash and fills as before. **KNOB 4** picks the beat, off at the bottom; there is no tempo knob, no kits, no
+    loudness steps, no "song's own part".
+  - `fm1_synth.c`: Felucca's ANALOG SAW LEAD, ACID and RAVE on **PRESETS 1 to 3** (then the game's 128
+    instruments), each of the music's channels on a one-note line of its own (four lines), with the preset's
+    distortion, chorus, delay (an eighth of the beat) and room reverb, and Felucca's master limiter. PULSE LD is
+    left out (a second engine).
+  - **SAVE** toggles the engine's own frames-a-second count (rp2040-doom's `USE_FPS`, which was compiled in all
+    along): small yellow digits in the picture's top right corner. For this round's measurements.
+- **How it was made to fit.** Felucca's set-up code and most of its tables are not in the firmware:
+  `firmware/gen_sound.c` (run on the Mac by `tools/gen_sound.sh`) works out the kit's coefficients for the 14
+  ways the patterns strike a voice and the three sounds' values, into `firmware/fm1_sound_gen.h` (in the
+  repository; `firmware/test.sh` checks it is current). The synth is the path those presets take through
+  Felucca's voice.c, eng_analog.c and fx.c, copied and cut (no chords, LFO, glide, modulation matrix, other
+  waves). The drum voices are called one kind at a time, so the seven kinds the kit does not have are not linked.
+- **MEASURED with the device's compiler** (`tools/size_probe.sh`): code 8,376 B + constants 5,531 B = 13.9 KB of
+  flash; RAM 50,068 B (the delay line 32 KB, the reverb 12 KB, the chorus 4 KB, the rest 2 KB). The first
+  estimate was about 18 KB of flash.
+- **The firmware:** 285,308 B (b14: 270,792; +14.5 KB with the engine's hooks); block 1 has 1,176 B spare. Build
+  id `f68dd272`; `doom_code.fwsc` 610,086 B, SHA-256 `07dce07c6598a077b27e398da24d7c1369211964d3cf3b1e8e61695e23660635`;
+  source commit `85ef453`. 21 package runs pass (`sh firmware/test.sh`).
+- **RAM is not the problem it looked** (MEASURED, `web/measure_heap.js`, a new test hook on the engine's
+  `Z_FreeMemory`): E1M1 uses about 14 KB of the game's heap, at the start and through a minute of scripted play
+  (the level's data stays in flash). The synth's 50 KB comes out of the window, so the FM-1's heap is now
+  183,264 B (was 233 KB); the browser build's heap is set to 176 KB to stay under it, and every browser test
+  passes there with 166 KB free.
+- **VERIFIED on the Mac:**
+  - `firmware/tests/synth_test.c`: for each of the three sounds, 16 s of busy notes on three channels (lines that
+    overlap, repeat keys, hang until the channel is let go, loud and soft) give **the same samples** from the
+    firmware's synth and from Felucca's whole sound core (`firmware/fm1_felucca.c`, kept for this): 0 of
+    1,590,272 samples differ. So what ships is, to the bit, what Sean heard in the takes.
+  - the drum machine's eight beats over a tone at the music's level: louder than it, peak 17,300 to 18,000, never
+    flat at full scale; off, the game's sound passes untouched.
+  - in the browser build, which is now this one configuration (`web/build.sh`; the separate prototype build is
+    gone): `test_drums.js` (16 checks), `test_synth.js` (7), and the older `test_sound_knobs.js`,
+    `test_message_line.js`, `test_controls.js`, `test_filter.js`, `test_node.js`, `test_view.js`, the two that
+    knew the tempo knob and the old PRESETS numbers brought up to date.
+  - **the recovery core**: id `9d99b4e4d399022c`, the same as b10 to b14; `tools/core_diff.py` against the kept
+    copies: no instruction differs from b11 to b14, and from b7 (`installed_2ab6deb5`, the last build known to
+    have run on the device) the same two functions differ as since b9, the audio interrupt and the screen blit,
+    both in game mode only. `firmware/doom_dev.c` is untouched.
+  - no library calls in the new code on the device (64-bit multiplies and divides are the chip's own).
+- **NOT VERIFIED, and only the device can say:** the frame rate with it; whether the sound keeps up (the mixer
+  runs in the main loop: if a frame takes too long the sound ring runs dry and crackles); how it sounds through
+  the FM-1's speaker. ESTIMATE of the cost: about 16 % of the chip with a sound and a beat both on. Not yet
+  done: switching the emulated chip off while it has nothing to play (both on), which would give time back.
+- b15 also carries everything since b7 that has not run on the device either: the keyboard layout of b8, the
+  sound knobs and pages of b9 to b14, the large message line.
+- **The site** (local, this branch): `site/sync_firmware.py b15`; KNOB 4 and PRESETS say what they do now; SAVE's
+  count is left off the page on purpose (as SCL and GLO are). 36 site tests pass. Built to
+  `site/frontend/dist-b15`, served at http://localhost:5185 by the `fm1-site-b15` preview entry or
+  `npx --prefix site/frontend vite preview site/frontend --outDir dist-b15 --port 5185 --strictPort`.
+  VERIFIED in the in-app browser: the page says "b15 · firmware f68dd272 · source 85ef453".
+- DEAD END on the way: `memmove` in the new code pulled the C library's memcpy in beside Felucca's own
+  (a duplicate symbol at link); the firmware's libc is Felucca's small one, which has no memmove.
+- LESSON: the estimate for flash was 4 KB too high because it counted Felucca's functions as Felucca compiles
+  them, whole; cut to what three presets use, and with the set-up done at build time, they are far smaller.
+  Build the cut before arguing about the budget.
