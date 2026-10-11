@@ -1627,3 +1627,51 @@ Sean asked what else a spare knob could do to the sound; of the ideas he picked 
   Felucca's loader. That risk belongs to every install (b5, b6, b7 too), not to these features.
 - ASSUMED, not said by Sean: that b7 has run on his FM-1. The comparison is against b7 because it is the build
   on `main`; if he last ran another build, the same check against that build's `installed_*` directory applies.
+
+## 2026-10-10 — Build "b10": pitch, tempo, FM depth; envelope and filter wobble behind ENV; the drive is gone (built and Mac-tested; NOT installed)
+
+Sean's verdict on b9: the instrument knob and the filter are "awesome", the drive never sounded good at any
+setting. (Clipping a whole mix makes every note beat against every other; the lesson taken: change the music
+inside its FM voices, or use effects that add nothing new.) He chose pitch and tempo for KNOB 3 and KNOB 4, FM
+depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble can be tried on the same build.
+
+- **Layout of the sound controls now.** PRESETS instrument; ALGORITHM FM depth; KNOB 1 filter sweep; KNOB 2
+  resonance; KNOB 3 pitch; KNOB 4 tempo. **ENV** swaps KNOB 3 and KNOB 4 to a second pair, envelope and wobble,
+  and back; what the first pair was set to stays in force. EDIT puts all of it back. KNOB 4 no longer changes
+  weapon (SELECT and OCT-/OCT+ do). The frame-rate readout moved from ENV to **GLO**.
+- **Pitch** (`i_oplmusic.c` FrequencyForVoice): semitones added to every melodic note that is not a fixed-pitch
+  instrument, 12 each way; `FM1_Retune` rewrites the frequency of the notes sounding, so the knob is heard at once.
+- **Tempo** (ScheduleTrack): the time to the music's next event is scaled; 12 steps each way, a twelfth of a
+  doubling each, 50 % to 200 %. Takes effect from the next event.
+- **FM depth** (`FM1_ShapeVoice`): the modulator's level of every voice in FM mode, 2 register steps (1.5 dB) a
+  click, 8 each way. Voices whose two operators are simply added are left alone.
+- **Envelope**: of the operators that are heard. Short (6 steps): the note falls to nothing while held (sustain
+  level to the bottom, decay rate at least 7 .. 12) and is released no slower. Long (6 steps): attack rate at
+  most 6 .. 1, release rate at most 8 .. 3. FIRST VERSION WAS WRONG, found by measuring: it changed only the
+  release rate and the "held" flag, and E1M1's guitars (GENMIDI 29, 30: attack 15, decay 0, release 15, not
+  held) did not react at all; and an attack capped at rate 3 was still too fast to hear, because the chip's
+  attack does most of its rise at the start. MEASURED after the fix: RMS falls 1488 -> 702 -> 163 across the
+  short steps; at long 6 the level swing drops from about 12 dB to 4 to 5 dB (everything rings on).
+- **Wobble** (`fm1_filter.h`): a triangle that swings the cutoff 8 knob steps each way (about an octave and a
+  third) about KNOB 1's position, at 11 speeds from 0.25 Hz to 8 Hz; it never crosses the centre or the ends,
+  and does nothing while the filter is off (the message line then says to turn KNOB 1). For this the filter
+  takes positions in 256ths of a knob step, the cutoff on a straight line between table entries (within
+  0.35 % of the true curve). The state grew by 8 bytes.
+- Tests. `firmware/tests/filter_test.c`: its 21 checks unchanged (on a knob step the filter is bit for bit what
+  it was) plus 5 for the above. `web/test_sound_knobs.js`, rewritten, 23 checks on the game's own music through
+  a test hook (`fm1_music_probe`: instrument, frequency register, modulator level, note as written, ticks
+  played): pitch +12 / -3 / clamped at -12 on every note seen; tempo 2x, 0.5x and back by ticks a second; FM
+  depth +4 and -8 on each instrument's modulator (29: 6 -> 0 / 22; 30: 13 -> 5 / 29; 34: 15 -> 7 / 31); ENV and
+  the second pair (short: a twelfth of the RMS; long: steadier; wobble: the top end's swing 15 -> 24 dB), the
+  first pair untouched meanwhile and back after ENV; EDIT restores everything; no underruns. Gameplay, layout,
+  filter and picture tests pass. `drive_test.c` and `fm1_drive.h` are deleted.
+- b10: firmware 269,920 B, recovery core id `9d99b4e4d399022c`, build id `6b746715`; `doom_part1.fwsc` SHA-256
+  `389492de…0a18082a`, `doom_code.fwsc` `b76e1423…8916a57a`; data block 2 unchanged. Block 1 has 16,600 B
+  spare. 18 package runs pass; the predicted flash (139 app sectors change, nothing else) passes
+  `check_dump.py`. Symbols: `firmware/installed_389492de/`. Source commit `009dd5e`.
+- VERIFIED with `tools/core_diff.py` against b7: 61 of the recovery core's functions are the same instructions,
+  6 the same with variables 8 bytes on, `fm1_lcd_speed_next` gone, and the two that differ are the audio
+  interrupt and the game's picture output, both game-mode only. The same answer as for b9.
+- NOT VERIFIED until it runs on the FM-1: how any of it sounds on the speaker; whether ALGORITHM, KNOB 3 and
+  KNOB 4 are the encoders the HAL's numbering says; whether the frame rate moves (GLO shows it).
+- OPEN, for Sean after trying: which pair KNOB 3 and KNOB 4 should have for good, and whether ENV stays.
