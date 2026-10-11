@@ -1704,3 +1704,12 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
   Play step in headless Chrome: no controls in the panel, the link lands on `#controls`.
 - NOT VERIFIED until it runs on the FM-1: that the letters are a good size on the real panel, and that drawing
   them costs nothing visible in frame rate.
+
+## 2026-10-10 — Build "b12": PRESETS at the bottom says "ORIGINAL MUSIC" (built and Mac-tested; NOT installed)
+
+- Sean's wording, in place of "MUSIC AS WRITTEN" (engine patch 0017). The other three messages that end in
+  "AS WRITTEN" (FM depth, pitch, envelope at rest) are as they were: he named only this one.
+- b12 = b11 with that string: firmware 270,844 B, build id `fb1e9925`, recovery core id unchanged
+  (`9d99b4e4d399022c`), `tools/core_diff.py` b11 -> b12: all 69 functions the same instructions.
+  `doom_part1.fwsc` SHA-256 `bd5b6b0f…b7ec2e73`, `doom_code.fwsc` `28814e0a…2520a341`; data block 2 unchanged.
+  19 package runs pass. Seen in the browser build. Symbols: `firmware/installed_bd5b6b0f/`. Source commit `b6fd5cd`.
