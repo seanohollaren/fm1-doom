@@ -38,6 +38,9 @@ volatile uint8_t fm1_drums_pattern;      /* 0: off; 1 .. NPATTERNS: PATTERNS[n -
 volatile uint8_t fm1_drums_kit;          /* KITS[n] */
 volatile uint8_t fm1_drums_loud = 2;     /* the kit against the music: LOUD[n], 0 .. 4 */
 static const uint16_t LOUD[5] = {128, 181, 256, 362, 512};   /* x 256: 3 dB a step, the kit's own level in the middle */
+volatile uint8_t fm1_drums_dip = 3;      /* how far the music steps back under a hit: DIP[n] of the kit's own depth */
+static const uint16_t DIP[5] = {0, 64, 128, 256, 384};       /* x 256: not at all, a quarter, half, the kit's own, half as much again */
+void fm1_osd_say(const char *text);      /* rp2040-doom src/fm1: a message across the top of the picture */
 extern unsigned int fm1_pass_frames;     /* rp2040-doom opl/opl_pico.c: mixer frames of this pass made so far */
 
 /* ---- the kits */
@@ -257,6 +260,17 @@ void fm1_drums_step(int step)
 
 int fm1_drums_hits(void) { return (int)hits; }                       /* (test hook) */
 
+/* (the prototype page's M key; no button of the panel has this yet) the music's dip under a hit, a step less each
+ * time and round to the most; says which, and returns it */
+int fm1_drums_dip_next(void)
+{
+    static char text[] = "MUSIC DIP 0 OF 5";
+    fm1_drums_dip = (uint8_t)((fm1_drums_dip + 4u) % 5u);
+    text[10] = (char)('1' + fm1_drums_dip);
+    fm1_osd_say(text);
+    return fm1_drums_dip;
+}
+
 /* ---- the sound */
 static int32_t block[CTL + 1];           /* the kit's last block, and before it the sample that ended the one before */
 static uint32_t at = (uint32_t)CTL << 16;
@@ -297,7 +311,7 @@ static void render(void)
 void fm1_drums_mix(int16_t *stereo, uint32_t frames)
 {
     const uint32_t step = (uint32_t)(((uint64_t)FS << 16) / MIX_RATE);   /* voice samples a mixer frame, 16.16 */
-    const int32_t depth = KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0].duck;
+    const int32_t depth = (KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0].duck * DIP[fm1_drums_dip < 5 ? fm1_drums_dip : 3]) >> 8;
     uint32_t f, q;
     if (!queued && !ringing) {           /* nothing playing (the last block was silence), nothing to come: no work */
         at = (uint32_t)CTL << 16;

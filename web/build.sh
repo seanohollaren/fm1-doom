@@ -31,9 +31,9 @@ for f in $FILES; do
 done
 [ $fail = 0 ] || exit 1
 touch $STAMP
-emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music,_fm1_web_osd,_fm1_web_filter_at$([ -n "$FM6" ] && echo ,_fm1_fm6_voices,_fm1_drums_hits) -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
+emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music,_fm1_web_osd,_fm1_web_filter_at$([ -n "$FM6" ] && echo ,_fm1_fm6_voices,_fm1_drums_hits,_fm1_drums_dip_next) -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
 # the page names the build in the addresses of the game's two files, so that a browser cannot show an older one
 sed -e "s/@BUILD@/$(date +%s)/g" -e "s/@BUILT@/$(date '+%-d %b %H:%M')/" web/index.html > $OUT/index.html
 # the prototype says what it is, and where its patches are
-[ -n "$FM6" ] && sed -i.bak 's|<p>FM-1 Doom \&mdash;|<p><b>PROTOTYPE with Felucca\&rsquo;s sounds.</b> Drum machine: <b>B</b> (SEQ) brings in a beat and steps through the patterns, <b>K</b> (ARP) through the kits, <b>N</b> (SAVE) through five loudnesses.<br>FM engine: PRESETS (keys 7 / 8), the first eight clicks are its patches, then the game\&rsquo;s own instruments.</p><p>FM-1 Doom \&mdash;|' $OUT/index.html && rm -f $OUT/index.html.bak
+[ -n "$FM6" ] && sed -i.bak 's|<p>FM-1 Doom \&mdash;|<p><b>PROTOTYPE with Felucca\&rsquo;s sounds.</b> Drum machine: <b>B</b> (SEQ) brings in a beat and steps through the patterns, <b>K</b> (ARP) through the kits, <b>N</b> (SAVE) makes the drums a step quieter (five levels, then round to the loudest), <b>M</b> makes the music dip a step less under each hit.<br>FM engine: PRESETS (keys 7 / 8), the first eight clicks are its patches, then the game\&rsquo;s own instruments.</p><p>FM-1 Doom \&mdash;|' $OUT/index.html && rm -f $OUT/index.html.bak
 echo "web: $OUT ($(wc -c < $OUT/doom.wasm | tr -d ' ') B wasm)"

@@ -62,10 +62,12 @@ globalThis.Module = {
       const loud = await listen(6000, false);
       check('the metal kit over the music: well above the music alone, and no flat tops', loud.rms > own.rms * 1.5 && loud.rms < own.rms * 6 && loud.top < 0.0005, `rms ${loud.rms.toFixed(0)} against ${own.rms.toFixed(0)}, peak ${loud.peak}`);
       const levels = [loud.rms];
-      for (let i = 0; i < 4; i++) { await tap(SAVE); levels.push((await listen(2500, false)).rms); }   // 4, 5, 1, 2 of 5
+      for (let i = 0; i < 4; i++) { await tap(SAVE); levels.push((await listen(2500, false)).rms); }   // 2, 1, 5, 4 of 5
       await tap(SAVE);                                                      // the middle again
-      check('SAVE: five loudnesses against the music, louder twice, then round to the quietest', levels[1] > levels[0] && levels[2] > levels[1] && levels[3] < levels[0] && levels[4] > levels[3] && levels[4] < levels[0],
+      check('SAVE: five loudnesses against the music, quieter twice, then round to the loudest', levels[1] < levels[0] && levels[2] < levels[1] && levels[3] > levels[0] && levels[4] < levels[3] && levels[4] > levels[0],
         levels.map(v => v.toFixed(0)).join(', '));
+      const dips = [0, 1, 2, 3, 4].map(() => M._fm1_drums_dip_next());
+      check('the page\'s M key: the music dips a step less each time (4 of 5 at the start), then round to the most', dips.join() === '2,1,0,4,3', dips.map(d => d + 1).join(', '));
       check('no audio underruns while listening at the game\'s own speed', M._fm1_web_underruns() === under, `${M._fm1_web_underruns() - under}`);
       await turn(PRESETS, 3); await sleep(1500);                            // ... with Felucca's FM engine on the melody too
       const all = await count(4);

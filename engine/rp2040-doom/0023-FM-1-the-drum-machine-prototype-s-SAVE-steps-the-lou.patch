@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 10:47:54 -0700
+Subject: [PATCH] FM-1: the drum machine prototype's SAVE steps the loudness
+ down, then round to the top
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_controls.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index f47caac..2c50046 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -279,7 +279,7 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_say("DRUM KIT ", -1, fm1_drums_kit_name(fm1_drums_kit));
+     }
+     if (pressed & (1u << FM1_BTN_SAVE)) {
+-        fm1_drums_loud = (uint8_t)((fm1_drums_loud + 1) % 5);
++        fm1_drums_loud = (uint8_t)((fm1_drums_loud + 4) % 5);   /* a step quieter each time, and round to the loudest */
+         fm1_say("DRUM LEVEL ", fm1_drums_loud + 1, " OF 5");
+     }
+ #endif
