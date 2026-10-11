@@ -1925,3 +1925,79 @@ Sean on the first pass: it works, but "not the kind of aggressive punchy drums t
 - The measured levels of the takes, for when he reports back (RMS of the whole mix; the game's own is 2,204):
   double bass at level 1 / 2 / 3 is about 3,700 / 4,800 / 6,500; rock 3,000 / 3,800 / 5,000; the dip changes
   the RMS by under 3 %.
+
+## 2026-10-11 — Drum machine prototype, third pass: Felucca's own effects chain, after a video (browser build only)
+
+Sean sent a YouTube short as "the exact super punchy and crunchy drum sound I'm dreaming of ... supposed to be
+running on felucca": https://youtube.com/shorts/9qCd4tj8J3U ("FM-1 Cyberpunk Jam | Felucca 1.1.5.1", Stanley
+Gurvich).
+
+- I cannot hear it. VERIFIED from the page's own text: the sounds were made with his own web / phone editor for
+  the FM-1, which is not published yet; "the felucca live fx"; "khs limiter on the master" (a studio limiter
+  plug-in on the recording). So it is the drum engine we already use (our Felucca checkout is v1.1.5), with
+  patches we cannot see, Felucca's effects, and limiting twice over. ASSUMED: the punch is mostly the limiting,
+  the crunch the engine's drive, the track distortion or the live CRUSH.
+- **What Felucca does after its drum voices** (VERIFIED in its source), none of which passes one and two used:
+  `eng_drum.c drum_render`: DRV, each voice x1 to x4 into the soft clip with its level kept, then x1.25 under a
+  soft knee at 24,000; `fx.c track_dist`: DIST on the track (a 55 Hz low cut, drive up to x9, a lopsided soft
+  clip, a two-pole tone filter that closes as the drive rises, make-up); `perform.c`: CRUSH, of the live
+  effects, on the whole mix (12 down to 5 bits, each sample held 1 to 8 times); `fx.c master_out`: a DC blocker,
+  a peak limiter (threshold 18,000, gives way in 4 samples, comes back over about 0.1 s), then the soft clip.
+- **Built:** five kits after the eight (`firmware/fm1_drums.c`), on those stages copied as they are:
+
+  | kit | voices | DRV | DIST | CRUSH | level x256 |
+  |---|---|---|---|---|---|
+  | LIMIT | Felucca's own kit | 0 | 0 | 0 | 132 |
+  | CRUNCH | Felucca's own kit | 70 | 30 | 0 | 161 |
+  | SLAM | the METAL kit's | 100 | 40 | 0 | 139 |
+  | FUZZ 80 | Felucca's 80 kit | 127 | 105 | 0 | 150 |
+  | CRUSH | Felucca's own kit | 60 | 0 | 50 | 113 |
+
+  All five send the whole mix through the master stage while a pattern is on: the music goes in at twice its
+  level (five steps on the page's M key, x0.7 to x2.8; the screen says MUSIC PUSH), so a hit pushes it down and
+  it comes back between hits. The chain fades in and out over 40 ms with the pattern. CRUSH is on the kit only,
+  not on the music as in Felucca (Sean's earlier verdict on distortion over the whole mix). The levels are set
+  so that a rock beat goes into the limiter at the same strength on every kit (RMS 6,200, 3 dB over the music
+  as it goes in): the kits differ in what a hit is, not in how loud.
+- DEAD END: a make-up gain of x1.56 after the soft clip, to bring its top (16,400) up to the other kits' peaks.
+  The limiter lets the first samples of a hit through, the soft clip rounds them off near full scale, and the
+  gain then clipped them flat at 32,767. Felucca has no gain there; neither have we now.
+- MEASURED, and new to me: **the game's own mix sits 1,431 above zero** (the take "own": RMS 2,204, of which
+  1,676 is sound). The chip's music is lopsided (half-wave operator shapes). Harmless at a DAC, but it used up
+  one side of the limiter's room, so Felucca's DC blocker went in ahead of the limiter, as in Felucca. Any
+  later stage that clips or limits the game's sound needs the same.
+- **BUG FOUND AND FIXED** (VERIFIED: six of the first 23 takes stopped with "memory access out of bounds"; none
+  after the fix). Since pass two, every step with a hit before the song's next event got a callback of its own.
+  The small build's callback queue holds 10, its "full" check is an assert that is compiled out, and a full
+  queue writes its entry before the array. A long note with a busy pattern does it: the title tune's last note
+  with any pattern of more than 8 hits a bar. E1M1 itself never has such a note, which is why 100 s tests and 45
+  takes passed; the new takes needed more key presses at the title and so sat there longer. Engine patch 0025:
+  the steps are a chain (one callback waits; when it has played its step it sets the next), and with
+  `FM1_DRUMS` a full queue drops the callback. Nothing changes in a build without `FM1_DRUMS` (the device's).
+  `web/test_drums.js` now starts with a pattern on through the title tune.
+- VERIFIED headless: `node web/test_drums.js` (36 checks: all 13 kits play the pattern; a limiter kit is louder
+  than twice the music with no flat tops, and with the drums off the music is back at its level);
+  `node web/test_fm6.js`; the normal build's `test_sound_knobs.js`; `sh firmware/test.sh`.
+- MEASURED on the takes (bars 5 to 8 of E1M1; RMS of the whole mix, peak; the game's own is 2,204 / 14,260):
+
+  | kit | rock | double bass | four on the floor |
+  |---|---|---|---|
+  | LIMIT | 4,505 / 22,423 | 6,319 / 21,924 | 4,433 / 21,239 |
+  | CRUNCH | 5,718 / 18,230 | 7,963 / 18,234 | 5,352 / 18,149 |
+  | SLAM | 5,934 / 18,039 | 7,784 / 18,133 | 5,051 / 18,284 |
+  | FUZZ 80 | 6,307 / 17,675 | 8,688 / 17,631 | 6,658 / 18,129 |
+  | CRUSH | 4,861 / 21,868 | 7,032 / 21,719 | 4,936 / 20,772 |
+
+  For comparison the second pass's METAL kit at drums 2, dip 2: rock 3,846, double bass 4,828. So these are
+  2 to 5 dB louder as a whole, by design: the music between hits is about twice as loud as the game's own.
+  With more music pushed in, the whole gets slightly quieter (CRUNCH double bass at drums 3: 8,582, 8,359,
+  7,963, 7,536 for push 2 to 5), because the limiter then works harder on every hit.
+- **Review page, version 2** (the same private address): a new first section with the five kits against three
+  patterns, a grid of drum level 2 to 4 against music push 2 to 5 on CRUNCH with double bass, and one take with
+  Felucca's Round bass patch on the melody. 28 new files, 73 in all.
+- NOT VERIFIED: how any of it sounds, and whether it is nearer the video. Not measured: the cost on the chip.
+  The limiter divides once a frame while it works (49,716 times a second), DIST and the DC blocker are a few
+  multiplies a frame; Felucca runs the same stages on the same chip, at 44,100.
+- LESSON: I recorded the takes three times (the crash, then the DC offset). Before designing a stage that
+  depends on level, measure the input's offset and peaks first; and test a prototype where the recorder will
+  use it (at the title, with many presses), not only where the test does.

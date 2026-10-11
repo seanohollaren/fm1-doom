@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 13:41:08 -0700
+Subject: [PATCH] FM-1: the drum machine prototype's steps wait one callback at
+ a time
+
+A callback for every step before the song's next event overran the small
+build's callback queue (10 entries) under a long note: the title tune's
+last, with a pattern on. OPL_Queue_Push then wrote its entry before the
+queue and the game stopped with a memory fault a little later.
+
+The steps are now a chain: one callback waits, and when it has played its
+step it sets the next. With FM1_DRUMS a full queue drops the callback.
+Nothing changes without FM1_DRUMS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ opl/opl_pico.c   |  3 +++
+ src/i_oplmusic.c | 54 ++++++++++++++++++++++++++++++++++--------------
+ 2 files changed, 41 insertions(+), 16 deletions(-)
+
+diff --git a/opl/opl_pico.c b/opl/opl_pico.c
+index 6bd0024..eaca590 100644
+--- a/opl/opl_pico.c
++++ b/opl/opl_pico.c
+@@ -559,6 +559,9 @@ void OPL_Queue_Push(opl_callback_queue_t *queue,
+                     uint64_t time) {
+     pheap_node_id_t id = ph_new_node(&opl_heap);
+     assert(id); // check not full
++#if FM1_DRUMS
++    if (!id) return;    // (full: the callback is lost, which is better than its entry written before the queue)
++#endif
+     queue_entry_t *qe = get_entry(queue, id);
+     qe->time = time;
+ #if !LIMITED_CALLBACK_TYPES
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index f155d4d..8275c8b 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -373,10 +373,23 @@ int fm1_drums_wants(int step);
+ void fm1_drums_step(int step);
+ unsigned int fm1_drums_bpm100 = 12000;      // the song's tempo, beats a minute x 100 (S_ChangeMusic knows the song)
+ static unsigned int fm1_song_pos;           // ticks from the song's start to the event last scheduled from
++// The steps between one event of the song and the next are a chain: one callback is waiting at a time, and
++// when it has played its step it sets the next. (The callback queue of the small build holds 10. A callback for
++// every step at once overran it under a long note, the title tune's last, and wrote over what lies before it.)
++static uint64_t fm1_drum_step;              // ticks in a thirty-second, 16.16
++static uint64_t fm1_drum_to;                // where the chain ends: the song's next event, ticks 16.16
++static uint64_t fm1_drum_at;                // the step the waiting callback is for, counted from the song's start
++static void FM1_DrumNext(uint64_t s, uint64_t from);
+ // (the callback queue of the small build knows its callbacks by their argument: a step is 1 .. 128, opl_pico.c)
+ void FM1_DrumStep(void *arg)
+ {
+-    fm1_drums_step((int) (uintptr_t) arg - 1);
++    int step = (int) (uintptr_t) arg - 1;
++
++    fm1_drums_step(step);
++    if (step == (int) (fm1_drum_at & 127))  // (not one left over from before the event: that chain has been replaced)
++    {
++        FM1_DrumNext(fm1_drum_at + 1, fm1_drum_at * fm1_drum_step);
++    }
+ }
+ #endif
+ const char *fm1_music_instr_name(int n)
+@@ -1724,6 +1737,25 @@ void TrackTimerCallback(void *arg)
+     ScheduleTrack(track);
+ }
+ 
++#if FM1_DRUMS
++// Set a callback for the first step with a hit from step `s` on that falls before the song's next event, if there
++// is one; `from` is where the music's clock stands now, in ticks 16.16.
++static void FM1_DrumNext(uint64_t s, uint64_t from)
++{
++    for (; s * fm1_drum_step < fm1_drum_to; s++)
++    {
++        if (fm1_drums_wants((int) (s & 127)))
++        {
++            uint64_t wait = (((s * fm1_drum_step - from) * us_per_beat) / ticks_per_beat) >> 16;
++
++            fm1_drum_at = s;
++            OPL_SetCallback((wait * fm1_music_time) >> 16, FM1_DrumStep, (void *) (uintptr_t) ((s & 127) + 1));
++            return;
++        }
++    }
++}
++#endif
++
+ static void ScheduleTrack(opl_track_data_t *track)
+ {
+     unsigned int nticks;
+@@ -1742,23 +1774,13 @@ static void ScheduleTrack(opl_track_data_t *track)
+ #endif
+ #if FM1_DRUMS
+     {
+-        // Every step with a hit that falls before the next event gets a callback of its own, timed from this
+-        // event: the drums follow the music's own clock. A tick is 1/140 s; a thirty-second is 1050 / bpm ticks.
+-        uint64_t step = ((uint64_t) 105000 << 16) / fm1_drums_bpm100;       // ticks, 16.16
++        // The steps with a hit that fall before the next event are played from callbacks timed from this event:
++        // the drums follow the music's own clock. A tick is 1/140 s; a thirty-second is 1050 / bpm ticks.
+         uint64_t from = (uint64_t) fm1_song_pos << 16;
+-        uint64_t to = from + ((uint64_t) nticks << 16);
+-        uint64_t s;
+ 
+-        for (s = (from + step - 1) / step; s * step < to; s++)
+-        {
+-            uint64_t wait = (((s * step - from) * us_per_beat) / ticks_per_beat) >> 16;
+-
+-            if (fm1_drums_wants((int) (s & 127)))
+-            {
+-                OPL_SetCallback((wait * fm1_music_time) >> 16, FM1_DrumStep,
+-                                (void *) (uintptr_t) ((s & 127) + 1));
+-            }
+-        }
++        fm1_drum_step = ((uint64_t) 105000 << 16) / fm1_drums_bpm100;
++        fm1_drum_to = from + ((uint64_t) nticks << 16);
++        FM1_DrumNext((from + fm1_drum_step - 1) / fm1_drum_step, from);
+         fm1_song_pos += nticks;
+     }
+ #endif

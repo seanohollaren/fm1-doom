@@ -56,8 +56,15 @@ typedef struct {
     uint8_t model;                       /* 0: the sounds below; 1 .. DV_NKIT: Felucca's model kit, as designed; 0xFF: its own kit, as designed */
     sound_t kick, kick2, snare, snare2, hat, open, crash, tom;   /* kick2, snare2: struck with the kick / the snare, a layer */
     uint16_t drive;                      /* the drums together into a soft clip, x 256 (256: no clip at all) */
-    uint8_t level;                       /* ... and out of it, of 256 */
+    uint16_t level;                      /* ... and out of it, x 256 */
     uint8_t duck;                        /* how far the music steps back under a kick or a snare, of 256 */
+    /* Felucca's own chain after the voices, as its firmware has it (eng_drum.c, fx.c): */
+    uint8_t drv;                         /* DRV, each voice x1 .. x4 into a soft clip with its level kept, 0 .. 127 */
+    uint8_t dist;                        /* DIST on the kit as one track: drive, a lopsided clip, a tone filter; 0 .. 127 */
+    uint8_t limit;                       /* 1: the whole mix through Felucca's master limiter and soft clip, where a hit
+                                          * pushes everything else down for a moment (in place of `duck` and the soft top) */
+    uint8_t crush;                       /* CRUSH, of Felucca's live effects (perform.c): fewer bits and a held sample,
+                                          * 0 .. 100; there on the whole mix, here on the kit only (the music stays whole) */
 } kit_t;
 static const kit_t KITS[] = {
     /* a metal kit: a short, high, driven kick with a hard beater click, so that fast double bass stays apart; a
@@ -66,20 +73,34 @@ static const kit_t KITS[] = {
      {DVT_PUNCH, 7, 30, 100, 90, 127}, {DVT_CLAVE, 3, 0, 0, 64, 75},
      {DVT_SNARE, 2, 80, 127, 127, 127}, {DVT_CLAP, 4, 20, 110, 0, 60},
      {DVT_HATC, 0, 45, 80, 80, 80}, {DVT_HATO, -3, 40, 64, 100, 75}, {DVT_CYM, 0, 100, 90, 110, 110},
-     {DVT_TOM, 0, 70, 100, 60, 120}, 330, 150, 90},
+     {DVT_TOM, 0, 70, 100, 60, 120}, 330, 150, 90, 0, 0, 0},
     /* a big rock kit: the round, long kick with a rim's knock on it, a fat long snare */
     {"PUNCH", 0,
      {DVT_ROUND, 0, 58, 80, 90, 127}, {DVT_RIM, -5, 20, 40, 40, 55},
      {DVT_SNARE, 0, 100, 95, 115, 127}, {DVT_CLAP, 0, 45, 70, 40, 50},
      {DVT_HATC, 0, 60, 64, 64, 80}, {DVT_HATO, 0, 50, 64, 64, 75}, {DVT_CYM, 0, 90, 70, 90, 105},
-     {DVT_TOM, 0, 80, 64, 50, 120}, 300, 150, 70},
+     {DVT_TOM, 0, 80, 64, 50, 120}, 300, 150, 70, 0, 0, 0},
     /* Felucca's own kit and its five model kits, as designed, clean */
-    {"STD", 0xFF, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
-    {"80", 1, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
-    {"10", 2, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
-    {"66", 3, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
-    {"55", 4, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
-    {"77", 5, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0},
+    {"STD", 0xFF, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    {"80", 1, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    {"10", 2, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    {"66", 3, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    {"55", 4, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    {"77", 5, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 110, 0, 0, 0, 0},
+    /* after a video of Felucca itself with the sound Sean is after ("FM-1 Cyberpunk Jam", Felucca 1.1.5.1): the same
+     * voices through Felucca's own drive, distortion, bit crusher and master limiter, which the kits above only
+     * imitate. LIMIT is Felucca's kit as it comes out of Felucca: clean, and loud enough to move the limiter.
+     * Their levels are set so that a rock beat has the same strength (RMS 6,200 into the limiter, 3 dB over the
+     * music as it goes in) whichever kit plays it: the kits differ in what the hits are, not in how loud. */
+    {"LIMIT", 0xFF, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 132, 0, 0, 0, 1, 0},
+    {"CRUNCH", 0xFF, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 161, 0, 70, 30, 1, 0},
+    {"SLAM", 0,
+     {DVT_PUNCH, 7, 30, 100, 90, 127}, {DVT_CLAVE, 3, 0, 0, 64, 75},
+     {DVT_SNARE, 2, 80, 127, 127, 127}, {DVT_CLAP, 4, 20, 110, 0, 60},
+     {DVT_HATC, 0, 45, 80, 80, 80}, {DVT_HATO, -3, 40, 64, 100, 75}, {DVT_CYM, 0, 100, 90, 110, 110},
+     {DVT_TOM, 0, 70, 100, 60, 120}, 256, 139, 0, 100, 40, 1, 0},
+    {"FUZZ 80", 1, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 150, 0, 127, 105, 1, 0},
+    {"CRUSH", 0xFF, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE, 256, 113, 0, 60, 0, 1, 50},
 };
 #define NKITS (sizeof KITS / sizeof KITS[0])
 
@@ -264,10 +285,10 @@ int fm1_drums_hits(void) { return (int)hits; }                       /* (test ho
  * time and round to the most; says which, and returns it */
 int fm1_drums_dip_next(void)
 {
-    static char text[] = "MUSIC DIP 0 OF 5";
+    static char text[] = "MUSIC DIP 0 OF 5", push[] = "MUSIC PUSH 0 OF 5";
     fm1_drums_dip = (uint8_t)((fm1_drums_dip + 4u) % 5u);
-    text[10] = (char)('1' + fm1_drums_dip);
-    fm1_osd_say(text);
+    text[10] = push[11] = (char)('1' + fm1_drums_dip);
+    fm1_osd_say(KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0].limit ? push : text);   /* (a kit on the limiter: how hard the music goes in) */
     return fm1_drums_dip;
 }
 
@@ -275,14 +296,40 @@ int fm1_drums_dip_next(void)
 static int32_t block[CTL + 1];           /* the kit's last block, and before it the sample that ended the one before */
 static uint32_t at = (uint32_t)CTL << 16;
 static uint8_t ringing;                  /* a voice was live in the last block */
+static int32_t dist_hp, dist_lp1, dist_lp2;     /* DIST's filters */
+static int32_t crush_held;                      /* CRUSH's held sample ... */
+static uint8_t crush_n;                         /* ... and how long it has been held */
+static int32_t lim_env = 18000;                 /* the master limiter's envelope */
+static int32_t dc_l, dc_r, dce_l, dce_r;        /* ... and the DC blocker in front of it */
+static int32_t engaged;                         /* how far the limiter's chain is faded in, 0 .. 4096 */
+#define LIM_T 18000                      /* Felucca's master limiter: its threshold */
+static const uint16_t PUSH[5] = {181, 256, 362, 512, 724};   /* the mix into the limiter, x 256: the M key's five steps */
+
+/* Felucca's DIST (fx.c track_dist), on the kit as one track: a low cut, drive of 1 to 9 times, a lopsided soft clip
+ * (a little bias: even harmonics), a two-pole tone filter that closes as the drive rises, make-up */
+static int32_t dist_run(int32_t x, int32_t d)
+{
+    const int32_t g = 4096 + d * d * 2, k = 32000 - d * 95, mk = 30000 - d * 120, bias = 2400;
+    int32_t y;
+    dist_hp += (x - dist_hp + 64) >> 7;
+    x = clamp(x - dist_hp, -230000, 230000);
+    y = softclip((((x >> 2) * g) >> 10) + bias) - softclip(bias);
+    dist_lp1 += mulq15(y - dist_lp1, k);
+    dist_lp2 += mulq15(dist_lp1 - dist_lp2, k);
+    return mulq15(dist_lp2, mk);
+}
 
 static void render(void)
 {
     const kit_t *k = &KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0];
-    int32_t y[CTL], m[CTL], sum[CTL];
+    int32_t y[CTL], m[CTL], sum[CTL], g = 0, mk = 0;
     uint32_t lane, i, any = 0, needs_metal = 0;
     block[0] = block[CTL];
     memset(sum, 0, sizeof sum);
+    if (k->drv) {                        /* Felucca's DRV (eng_drum.c drum_render): x1 .. x4 into the soft clip, the level kept */
+        g = 4096 + k->drv * 3 * 4096 / 127;
+        mk = (int32_t)((19661u << 15) / (uint32_t)softclip((19661 * g) >> 12));
+    }
     for (lane = 0; lane < DV_NLANE; lane++)
         if (have[lane] && (voice[lane].live || voice[lane].trig) && dv_uses_metal(coef[lane].type))
             needs_metal = 1;
@@ -292,35 +339,90 @@ static void render(void)
         if (!have[lane] || !(voice[lane].live || voice[lane].trig))
             continue;
         dv_run(&coef[lane], &voice[lane], needs_metal ? m : 0, y, CTL);
-        for (i = 0; i < CTL; i++)
-            sum[i] += y[i];
+        for (i = 0; i < CTL; i++) {
+            int32_t v = y[i];
+            if (g)
+                v = (softclip((v * g) >> 12) * mk) >> 15;
+            if (k->limit)                /* ... and its voice level: x1.25 under a knee, then x1.46 onto the track */
+                v = (soft_knee(v + (v >> 2), 24000) * 47840) >> 15;
+            sum[i] += v;
+        }
         any = 1;
     }
-    for (i = 0; i < CTL; i++) {          /* the kit's drive: all of it together into a soft clip (256: none), then its level */
+    for (i = 0; i < CTL; i++) {
         int32_t v = sum[i];
-        if (k->drive != 256)
+        if (k->dist)
+            v = dist_run(v, k->dist);
+        if (k->crush && (any || v)) {    /* Felucca's CRUSH (perform.c perf_block): 12 .. 5 bits, each held 1 .. 8 samples */
+            const uint32_t sh = 4u + k->crush * 7u / 100u;
+            if (++crush_n >= sh - 3u) {
+                crush_n = 0;
+                crush_held = ((v >> sh) << sh) + (1 << (sh - 1u));
+            }
+            v = crush_held;
+        }
+        if (k->drive != 256)             /* (the kits made here: all of it together into a soft clip) */
             v = softclip(clamp((v * k->drive) >> 8, -65535, 65535));
         block[i + 1] = (((v * k->level) >> 8) * LOUD[fm1_drums_loud < 5 ? fm1_drums_loud : 2]) >> 8;
     }
-    ringing = (uint8_t)any;
+    ringing = (uint8_t)(any || (k->dist && (dist_lp2 > 8 || dist_lp2 < -8)));
 }
 
-/* Add the drums to `frames` frames of the mixer's 16-bit stereo: the pass the queued hits belong to. Under a kick
- * or a snare the rest steps back a little (the kit says how far) and comes back over about a tenth of a second;
- * the sum has a soft top above half scale, so the kit can be loud without the hard edge of clipping. */
+/* Felucca's DC blocker (fx.c dc_block), about 2 Hz: a leaky integrator of the input taken from it, the step's
+ * remainder kept. (The chip's music is lopsided: MEASURED, the game's own mix sits 1,400 above zero, which would
+ * otherwise use up one side of the limiter's room.) */
+static inline int32_t dc_block(int32_t x, int32_t *dc, int32_t *err)
+{
+    int32_t e = (x << 6) - *dc + *err, d = e >> 12;
+    *err = e - (d << 12);
+    *dc += d;
+    return x - ((*dc + 32) >> 6);
+}
+
+/* Felucca's master stage (fx.c master_out) on one frame: the DC blocker, then a peak limiter (it gives way in a
+ * tenth of a millisecond and comes back over a tenth of a second) in front of a soft clip, so that a hit pushes
+ * everything else down */
+static void master(int32_t *l, int32_t *r)
+{
+    int32_t al, ar, a;
+    *l = dc_block(*l, &dc_l, &dce_l);
+    *r = dc_block(*r, &dc_r, &dce_r);
+    al = *l < 0 ? -*l : *l;
+    ar = *r < 0 ? -*r : *r;
+    a = al > ar ? al : ar;
+    if (a > lim_env)
+        lim_env += (a - lim_env) >> 2;
+    else if (lim_env > LIM_T)
+        lim_env -= ((lim_env - LIM_T) >> 12) + 1;
+    if (lim_env > LIM_T) {
+        int32_t g = (int32_t)(((uint32_t)LIM_T << 15) / (uint32_t)lim_env);
+        *l = ((*l >> 4) * g) >> 11;
+        *r = ((*r >> 4) * g) >> 11;
+    }
+    *l = softclip(*l);
+    *r = softclip(*r);
+}
+
+/* Add the drums to `frames` frames of the mixer's 16-bit stereo: the pass the queued hits belong to.
+ * The kits made here: under a kick or a snare the rest steps back a little (the kit says how far) and comes back
+ * over about a tenth of a second, and the sum has a soft top above half scale. The kits on Felucca's chain: the
+ * whole mix, pushed by the M key's setting, goes through Felucca's master limiter for as long as a pattern is on. */
 void fm1_drums_mix(int16_t *stereo, uint32_t frames)
 {
     const uint32_t step = (uint32_t)(((uint64_t)FS << 16) / MIX_RATE);   /* voice samples a mixer frame, 16.16 */
-    const int32_t depth = (KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0].duck * DIP[fm1_drums_dip < 5 ? fm1_drums_dip : 3]) >> 8;
+    const kit_t *k = &KITS[fm1_drums_kit < NKITS ? fm1_drums_kit : 0];
+    const int32_t depth = (k->duck * DIP[fm1_drums_dip < 5 ? fm1_drums_dip : 3]) >> 8;
+    const int32_t push = PUSH[fm1_drums_dip < 5 ? fm1_drums_dip : 3], want = k->limit && fm1_drums_pattern ? 4096 : 0;
     uint32_t f, q;
-    if (!queued && !ringing) {           /* nothing playing (the last block was silence), nothing to come: no work */
+    if (!queued && !ringing && !engaged && !want) {   /* nothing playing (the last block was silence), nothing to come: no work */
         at = (uint32_t)CTL << 16;
         block[CTL] = 0;
         ducked = 0;
+        lim_env = LIM_T;
         return;
     }
     for (f = 0; f < frames; f++, stereo += 2) {
-        int32_t a, b, s, g;
+        int32_t a, b, s, g, l, r;
         if (at >= (uint32_t)CTL << 16) {
             at -= (uint32_t)CTL << 16;
             for (q = 0; q < queued; q++)                     /* hits whose sample has come, in the order they were made */
@@ -336,8 +438,17 @@ void fm1_drums_mix(int16_t *stereo, uint32_t frames)
         at += step;
         g = 256 - ((depth * ducked) >> 15);
         ducked -= (ducked * 15) >> 16;                       /* about 90 ms to a third */
-        stereo[0] = (int16_t)clamp(soft_knee(((stereo[0] * g) >> 8) + s, 16384), -32767, 32767);
-        stereo[1] = (int16_t)clamp(soft_knee(((stereo[1] * g) >> 8) + s, 16384), -32767, 32767);
+        l = soft_knee(((stereo[0] * g) >> 8) + s, 16384);    /* the kits made here */
+        r = soft_knee(((stereo[1] * g) >> 8) + s, 16384);
+        if (engaged || want) {                               /* Felucca's master, faded in and out over about 40 ms */
+            int32_t fl = ((stereo[0] * push) >> 8) + s, fr = ((stereo[1] * push) >> 8) + s;
+            master(&fl, &fr);
+            engaged += engaged < want ? 2 : engaged > want ? -2 : 0;
+            l += ((fl - l) * (engaged >> 4)) >> 8;
+            r += ((fr - r) * (engaged >> 4)) >> 8;
+        }
+        stereo[0] = (int16_t)clamp(l, -32767, 32767);
+        stereo[1] = (int16_t)clamp(r, -32767, 32767);
     }
     for (q = 0; q < queued; q++)                             /* (any left fell in the pass's last block: play them next) */
         if (queue[q].type != 0xFF)
