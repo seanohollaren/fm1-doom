@@ -1818,3 +1818,37 @@ could those be heard in Doom? He agreed to a listening prototype in the browser 
   onto the patch, and the patch choice somewhere better than the first eight clicks if it stays.
 - ASSUMED: that Felucca's 1.7 % per 100 figure carries over to our firmware (same chip, same start-up code and
   clock set-up from Felucca's HAL; not measured by us).
+
+## 2026-10-10 — Prototype: a drum machine under the song, with Felucca's drum voices (browser build only)
+
+Sean: press a button and a drum track starts on the Doom song, "really crunchy snare and bass", maybe four on
+the floor; is it possible?
+
+- **Yes, and it is the cheaper of the two prototypes.** `firmware/fm1_drums.c`: Felucca's DRUM engine
+  (`drum_voice.c` with `dsp.c`, unchanged, read from the Felucca checkout; GPL-3.0-only like the rest) as an
+  eight-lane machine. SEQ steps through: off, the song's own drum part (its General MIDI drum notes on real
+  drum voices, through Felucca's own note map), a rock beat, four on the floor, half time. ARP steps through
+  the kits: Felucca's own and its five model kits ("80", "10", "66", "55", "77"). While it plays the chip's
+  percussion is silent. EDIT turns it off with everything else.
+- **Staying in time.** MEASURED from the songs' note times in the WAD: E1M1 is at 110 beats a minute (a bar is
+  305.45 of the music's 1/140 s ticks; the song is exactly 44 bars, 13,440 ticks), the title jingle at 140. The
+  music's player schedules a callback for every sixteenth that falls before its next event, timed from the event
+  before it, on the same timer as its own notes (engine patch 0021, under `FM1_DRUMS`), so the beat cannot
+  drift against the tune, restarts with the song's loop and follows the tempo knob. A hit is queued with its
+  place in the mixer pass (`fm1_pass_frames`, new in `opl_pico.c`) and struck there, within a 32-sample block
+  (under a millisecond).
+- DEAD END on the way: the first build crashed about 100 s in, untouched. The small build's callback queue
+  (`opl_pico.c`, `LIMITED_CALLBACK_TYPES`) does not store a callback's function: it takes any callback with an
+  argument to be the track's and one without to be the song's restart, so each drum step was run as a track
+  event on a bogus track. It now knows a third kind (arguments 1 .. 16). The queue holds 10 entries; the
+  steps add one or two.
+- VERIFIED headless, `node web/test_drums.js` (16 checks): each pattern makes its number of hits per bar of the
+  song (13, 10, 7; measured 12.8, 9.7, 7.1 against the music's own tick count), the same at double tempo; the
+  chip's drums are silent meanwhile and back afterwards; the five model kits play; it runs together with the
+  FM6 prototype; no clipping to speak of (peaks about 20,000 of 32,767), no underruns; the song plays through
+  its loop twice with the drums on and off. Recording: `web/build-fm6/doom-drum-machine.m4a` (not in git).
+- **Cost on the device, from Felucca's own test** (`Felucca/build/host/drum_test`, run here): a voice costs only
+  while it sounds: kick 1.5 %, snare 2.0 %, a hat 1.0 % of the chip by Felucca's ratio, so a busy bar is a few
+  per cent. In Felucca's build the voices are a little over 5 KB of flash; their state here is about 1.5 KB.
+- NOT DONE: nothing for the device. Notes of the FM6 prototype are still applied at the start of a mixer pass
+  (up to 10 ms early); the drums are not.
