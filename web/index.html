@@ -12,7 +12,7 @@ Ctrl or F &rarr; F5 (fire) &middot; Space &rarr; G5 (use) &middot; Enter &rarr; 
 1 2 &rarr; KNOB 1 (filter: low-pass / off / high-pass) &middot; 3 4 &rarr; KNOB 2 (resonance) &middot; 7 8 &rarr; PRESETS (the music's instrument) &middot; Z X &rarr; ALGORITHM (FM depth)<br>
 5 6 &rarr; KNOB 3 (pitch) &middot; 9 0 &rarr; KNOB 4 (tempo) &middot; E &rarr; EDIT (all the sound as it was)<br>
 P &rarr; ENV: the four knobs become attack, decay, sustain, release, and back &middot; L &rarr; LFO: KNOB 1 becomes the filter's wobble, and back<br>
-<span id="fps"></span></p>
+<span id="fps"></span> &middot; built @BUILT@</p>
 <script>
   // PC key -> FM-1 panel element. n: note key (0 = F3 .. 26 = G5), b: button by printed label, e: [encoder, steps].
   // The game only ever sees the panel; rp2040-doom/src/fm1/fm1_controls.c turns it into Doom keys.
@@ -25,6 +25,7 @@ P &rarr; ENV: the four knobs become attack, decay, sustain, release, and back &m
                   Digit5: {e: [5, -1]}, Digit6: {e: [5, 1]}, Digit7: {e: [2, -1]}, Digit8: {e: [2, 1]},       // KNOB 3; PRESETS
                   KeyZ: {e: [1, -1]}, KeyX: {e: [1, 1]}, KeyE: {b: BTN.EDIT} };                               // ALGORITHM; EDIT (KNOB 4 is 9 0, ENV is P)
   var Module = {
+    locateFile: f => f + '?v=@BUILD@',          // (a new build must not be answered from the browser's cache)
     onRuntimeInitialized() {
       const ctx = document.getElementById('lcd').getContext('2d'), img = ctx.createImageData(240, 240);
       let notes = 0, buttons = 0;
@@ -70,4 +71,4 @@ P &rarr; ENV: the four knobs become attack, decay, sustain, release, and back &m
     }
   };
 </script>
-<script src="doom.js"></script>
+<script src="doom.js?v=@BUILD@"></script>
