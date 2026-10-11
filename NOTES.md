@@ -2001,3 +2001,16 @@ Gurvich).
 - LESSON: I recorded the takes three times (the crash, then the DC offset). Before designing a stage that
   depends on level, measure the input's offset and peaks first; and test a prototype where the recorder will
   use it (at the title, with many presses), not only where the test does.
+
+## 2026-10-11 — Sean's first verdict on the third pass; which Felucca sounds the prototype has
+
+- Sean, by ear, on the review page's grid: the default square (CRUNCH kit, double bass, drums 3, music 4, that is
+  the music into the limiter at twice its level) "sounds pretty good to me". That is what the prototype build
+  starts with on that kit, so nothing changes. VERIFIED by him on the recording only, not in the game.
+- He asked how the Felucca patches on the page were chosen: none of the ones he was most interested in is there.
+  They were not chosen by sound. The prototype has one of Felucca's engines, FM6 (the one the brief names for
+  Phase 4), and its eight factory patches are all that engine has. VERIFIED in Felucca v1.1.5's source: the
+  PRESETS knob there walks twelve engines with about 70 factory presets (ANALOG 12, FM6 8 + 8 converted from
+  the retired four-operator engine, PHASE 6, LOFI 5, VOICE 4, TRIO 5, WHEEL 5, GRAIN 4, PHYS 9, NOISE 4, DRUM,
+  and SAMPLE's recorded sounds), and every preset also sets chorus, delay and reverb sends, which the prototype
+  does not have. So the sounds he likes on the device are most likely another engine's. Open: which ones.
