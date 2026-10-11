@@ -1675,3 +1675,32 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
 - NOT VERIFIED until it runs on the FM-1: how any of it sounds on the speaker; whether ALGORITHM, KNOB 3 and
   KNOB 4 are the encoders the HAL's numbering says; whether the frame rate moves (GLO shows it).
 - OPEN, for Sean after trying: which pair KNOB 3 and KNOB 4 should have for good, and whether ENV stays.
+
+## 2026-10-10 — Build "b11": the knob messages large on the screen; the Play step links to the controls (built and Mac-tested; NOT installed)
+
+- Sean asked for the message line that says what a knob has done to be about twice the size, if that was not a
+  problem. It was not, done outside the game's own HUD: `rp2040-doom/src/fm1/fm1_osd.h` (engine patch 0016)
+  holds a font drawn for it (capitals, digits and the punctuation the messages and GENMIDI's names use: 5 dots by
+  7) and writes a message at the panel's own resolution, each dot 2 x 2 pixels, in lines of 20 characters on a
+  band dimmed to a quarter, for three seconds. `fm1_video.c` draws it into each panel row on its way out, four
+  rows below the top of the picture, so it is also right in the 150- and 180-row shapes, and it shows over the
+  title and the menus too. All of the firmware's own messages (`fm1_say`) go there now. The game's own messages
+  ("PICKED UP A CLIP") are as they were: small, and squeezed 4 to 3 with the rest of the picture.
+- For scale: the game's message font is about 7 x 8 in the 320 x 200 picture, so about 5 x 10 pixels on the
+  panel in the full-screen shape; the new letters are 10 x 14 in a 12 x 18 cell.
+- VERIFIED on the Mac: `firmware/tests/osd_test.c` (new, 8 checks): each of 25 messages, with the longest
+  instrument names, fits in one or two lines of whole words with a letter for every character; the band's
+  pixels are a quarter as bright or white and nothing outside it is touched; the widest line stays inside the
+  row. Looked at in the browser build ("MUSIC 20 CHURCH / ORGAN", "TEMPO 119%" in the 150-row shape); gone again
+  after three seconds. All browser-build tests pass.
+- b11: firmware 270,848 B (+928 B), build id `feeacfe6`; `doom_part1.fwsc` SHA-256 `fae910c3…b3f51d4c`,
+  `doom_code.fwsc` `93265962…f47aa309`; data block 2 unchanged; block 1 has 15,640 B spare. 19 package runs
+  pass; predicted flash (139 app sectors, nothing else) passes `check_dump.py`. Symbols:
+  `firmware/installed_fae910c3/`. Source commit `23c28d0`.
+- VERIFIED: the recovery core id is b10's (`9d99b4e4d399022c`: the device unit did not change), and
+  `tools/core_diff.py` b10 -> b11 finds all 69 functions the same instructions.
+- Site: the Play step no longer repeats the controls drawing and list; its forward button is "View controls", a
+  link to the manual's controls section further down the page. Checked by walking the stand-in install to the
+  Play step in headless Chrome: no controls in the panel, the link lands on `#controls`.
+- NOT VERIFIED until it runs on the FM-1: that the letters are a good size on the real panel, and that drawing
+  them costs nothing visible in frame rate.
