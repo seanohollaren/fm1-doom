@@ -91,6 +91,7 @@ describe.skipIf(!existsSync(source))('the controls table against the firmware so
     const keys: Record<number, string> = {}
     const buttons: Record<string, string> = {}
     for (const m of map.matchAll(/\{(\d+|BTN\(FM1_BTN_(\w+)\)), ([^}]+)\}/g)) {
+      if (m[3].trim() === "'\\\\'") continue // SAVE: the engine's frames-a-second count, left out on purpose like SCL and GLO
       const does = DOES[m[3].trim()]
       expect(does, `the page has no word for ${m[3]}`).toBeTruthy()
       if (m[2]) buttons[LABEL[m[2]] ?? m[2]] = does

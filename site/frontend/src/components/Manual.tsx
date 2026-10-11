@@ -26,7 +26,7 @@ export function Manual() {
           <h3 className="display manual__h">Controls</h3>
           <p className="manual__lede">
             The low end of the keyboard moves you. The high end fires and opens doors. And because the FM-1 is a synthesizer, six knobs
-            reshape the sound while you play: a filter over everything, and the music’s instrument, tone, pitch and tempo.
+            reshape the sound while you play: a filter over everything, the music’s instrument, tone and pitch, and a drum beat under it.
           </p>
           <Controls />
         </article>
