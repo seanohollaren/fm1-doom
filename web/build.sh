@@ -1,8 +1,9 @@
 #!/bin/sh
 # Browser build of FM-1 Doom: rp2040-doom's tiny engine + src/fm1 platform layer -> build/doom.{js,wasm} + index.html
 #   web/build.sh            (first: cd rp2040-doom && ./cup.sh FILE.whx   to embed the game data)
-#   FM6=1 web/build.sh      the prototype with Felucca's six-operator FM engine playing the music's melodic notes
-#                           (firmware/fm1_fm6.c) and its drum voices as a drum machine in time with the song
+#   FM6=1 web/build.sh      the prototype with Felucca's synth (every engine and preset, with its effects) playing
+#                           the music's melodic notes (firmware/fm1_felucca.c; the first one had its FM6 engine
+#                           only, hence the name) and its drum voices as a drum machine in time with the song
 #                           (firmware/fm1_drums.c); needs ./Felucca built, for its tables; into web/build-fm6
 # Uses the same engine configuration as the size check (sizecheck/defs.txt), i.e. the 32-bit small-memory layout.
 set -e
@@ -15,7 +16,7 @@ for d in pico-sdk/src/common/*/include pico-sdk/src/host/*/include pico-extras/s
 # link order matters for the short-pointer window: big never-short-pointed buffers first, the heap block last (fm1_web_ram.c)
 FILES="src/fm1/fm1_video.c src/fm1/fm1_web.c $(cat sizecheck/files.txt | tr ' ' '\n' | grep -v pd_render | tr '\n' ' ') src/pico/i_picosound.c opl/opl_pico.c ../pico-sdk/src/common/pico_util/pheap.c src/fm1/fm1_debug.c src/fm1/fm1_audio.c src/fm1/fm1_controls.c src/fm1/fm1_platform.c src/fm1/fm1_sdk.c src/fm1/fm1_web_ram.c"
 FILES="src/pd_render.cpp $FILES"
-if [ -n "$FM6" ]; then D="$D -DFM1_FM6=1 -DFM1_DRUMS=1"; I="$I -IFelucca/build/gen -IFelucca/firmware/src"; FILES="$FILES ../firmware/fm1_fm6.c ../firmware/fm1_drums.c"; fi
+if [ -n "$FM6" ]; then D="$D -DFM1_FM6=1 -DFM1_DRUMS=1"; I="$I -IFelucca/build/gen -IFelucca/firmware/src"; FILES="$FILES ../firmware/fm1_felucca.c ../firmware/fm1_drums.c"; fi
 # as firmware/build_in.sh: reuse an object only if no header, define list or script changed since the last complete build
 STAMP=$OBJ/.complete
 if [ ! -f $STAMP ] || [ -n "$(find rp2040-doom/src rp2040-doom/opl rp2040-doom/textscreen sizecheck web/build.sh \( -name '*.h' -o -name '*.txt' -o -name '*.sh' -o -name '*.inc' \) -newer $STAMP 2>/dev/null | head -1)" ]; then
@@ -31,9 +32,9 @@ for f in $FILES; do
 done
 [ $fail = 0 ] || exit 1
 touch $STAMP
-emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music,_fm1_web_osd,_fm1_web_filter_at$([ -n "$FM6" ] && echo ,_fm1_fm6_voices,_fm1_drums_hits,_fm1_drums_dip_next) -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
+emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music,_fm1_web_osd,_fm1_web_filter_at$([ -n "$FM6" ] && echo ,_fm1_fm6_voices,_fm1_fm6_count,_fm1_fm6_parts,_fm1_fm6_chord,_fm1_fm6_poly,_fm1_drums_hits,_fm1_drums_dip_next) -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
 # the page names the build in the addresses of the game's two files, so that a browser cannot show an older one
 sed -e "s/@BUILD@/$(date +%s)/g" -e "s/@BUILT@/$(date '+%-d %b %H:%M')/" web/index.html > $OUT/index.html
 # the prototype says what it is, and where its patches are
-[ -n "$FM6" ] && sed -i.bak 's|<p>FM-1 Doom \&mdash;|<p><b>PROTOTYPE with Felucca\&rsquo;s sounds.</b> Drum machine: <b>B</b> (SEQ) brings in a beat and steps through the patterns, <b>K</b> (ARP) through the kits, <b>N</b> (SAVE) makes the drums a step quieter (five levels, then round to the loudest), <b>M</b> makes the music dip a step less under each hit.<br>FM engine: PRESETS (keys 7 / 8), the first eight clicks are its patches, then the game\&rsquo;s own instruments.</p><p>FM-1 Doom \&mdash;|' $OUT/index.html && rm -f $OUT/index.html.bak
+[ -n "$FM6" ] && sed -i.bak -e 's|<p>FM-1 Doom \&mdash;|<p><b>PROTOTYPE with Felucca\&rsquo;s sounds.</b> Drum machine: <b>KNOB 4</b> (keys 9 / 0) picks the beat, off at the bottom (there is no tempo knob here); <b>B</b> (SEQ) steps through the beats too, <b>K</b> (ARP) through the kits, <b>N</b> (SAVE) makes the drums a step quieter (five levels, then round to the loudest), <b>M</b> makes the music dip a step less under each hit.<br>Felucca\&rsquo;s synth on the melody: PRESETS (keys 7 / 8), the first 66 clicks are its presets with their chorus, delay and reverb (7 is RAVE), then the game\&rsquo;s own instruments.</p><p>FM-1 Doom \&mdash;|' -e 's|KNOB 4 (tempo)|KNOB 4 (the drum beat)|' $OUT/index.html && rm -f $OUT/index.html.bak
 echo "web: $OUT ($(wc -c < $OUT/doom.wasm | tr -d ' ') B wasm)"

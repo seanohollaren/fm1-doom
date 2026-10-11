@@ -35,7 +35,7 @@ typedef struct {                         /* Felucca's core.h vmod_t: dsp.c names
 #define BAR 32                           /* steps in a bar: thirty-seconds */
 
 volatile uint8_t fm1_drums_pattern;      /* 0: off; 1 .. NPATTERNS: PATTERNS[n - 1]; NPATTERNS + 1: the song's own drum part */
-volatile uint8_t fm1_drums_kit;          /* KITS[n] */
+volatile uint8_t fm1_drums_kit = 9;      /* KITS[n]; CRUNCH to begin with (Sean's pick by ear, with the level and push below) */
 volatile uint8_t fm1_drums_loud = 2;     /* the kit against the music: LOUD[n], 0 .. 4 */
 static const uint16_t LOUD[5] = {128, 181, 256, 362, 512};   /* x 256: 3 dB a step, the kit's own level in the middle */
 volatile uint8_t fm1_drums_dip = 3;      /* how far the music steps back under a hit: DIP[n] of the kit's own depth */

@@ -54,11 +54,17 @@ globalThis.Module = {
       await tap(SEQ);
       const off = await count(4);
       check('SEQ past the last: off, and the chip has its drums back', off.hits === 0 && off.chip > 0);
-      await tap(SEQ);                                                       // double bass again
-      await turn(K4, 12); await sleep(500);
-      const fast = await count(8);
-      check('the tempo knob at double speed: the drums keep to the song (the same hits in eight bars)', Math.abs(fast.hits - 188) <= 6, `${fast.hits}`);
-      await turn(K4, -12);
+      // KNOB 4 picks the beat (there is no tempo knob in this build): off at the bottom, the song's own part at the top
+      await turn(K4, 6); await sleep(300);
+      const rock = await count(4);
+      await turn(K4, 20); await sleep(300);
+      const top = await count(4);
+      await turn(K4, -20); await sleep(300);
+      const none = await count(4);
+      check('KNOB 4 picks the beat: six clicks up is rock, the top is the song\'s own part, the bottom is off', Math.abs(rock.hits - 55) <= 4 && top.hits > 20 && top.chip === 0 && none.hits === 0 && none.chip > 0 && Math.abs(none.ticks - 1222) < 40,
+        `${rock.hits} hits, ${top.hits} hits, ${none.hits} hits; four bars are ${none.ticks} ticks`);
+      await turn(K4, 1);                                                    // double bass again
+      for (let i = 0; i < 4; i++) await tap(ARP);                           // the kit to begin with is CRUNCH (10 of 13): on to METAL, the first
       for (let k = 1; k < KITS; k++) {
         await tap(ARP);
         const c = await count(4), l = await listen(1500, false);
