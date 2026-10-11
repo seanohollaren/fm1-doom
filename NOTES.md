@@ -1852,3 +1852,38 @@ the floor; is it possible?
   per cent. In Felucca's build the voices are a little over 5 KB of flash; their state here is about 1.5 KB.
 - NOT DONE: nothing for the device. Notes of the FM6 prototype are still applied at the start of a mixer pass
   (up to 10 ms early); the drums are not.
+
+## 2026-10-11 — Drum machine prototype, second pass: heavier kits and metal patterns (browser build only)
+
+Sean on the first pass: it works, but "not the kind of aggressive punchy drums that I was hoping for"; he wants
+"super noticeable options, like metal double bass", and asked for the route.
+
+- **What was wrong with pass one, MEASURED on the drums alone:** Felucca's kits as designed are clean and
+  dynamic (peak 9 times RMS on a rock beat) and I had mixed them at a third of their level, under the music.
+- **Kits.** Two set up here from Felucca's voices, ahead of its six: METAL (the kick tuned up 7 semitones,
+  short, a big sweep, driven, with a 3 kHz clave struck with it as a beater click; the snare bright with all
+  its wires and a clap on top; a low short open hat as a china) and PUNCH (the round long kick with a rim's
+  knock, a fat long snare). Each kit's sum goes into a soft clip (drive x1.3) and under every kick and snare
+  the rest of the mix steps back by about a third for a tenth of a second. Each hit has a strength (a fast foot
+  plays lighter). The whole sum has a soft top above half scale in place of hard clipping. SAVE steps five
+  loudnesses, 3 dB apart.
+- DEAD END: the first settings (drive x2, level 0.8, long cymbals) measured peak 1.4 to 2.7 times RMS and an RMS
+  of 9,000 to 17,000 against the music's 1,700: a wall with no hits in it. Now, at the middle loudness: METAL
+  double bass RMS 6,300, peak 18,500 (2.9); rock 4,600 (4.0); half time 3,000 (6.2).
+- **Patterns**, on a bar of 32 steps (thirty-seconds): DOUBLE BASS (kick on every sixteenth), GALLOP (an
+  eighth and two sixteenths a beat, as the riff goes), THRASH (kick on the beats, snare between), BLAST (kick
+  and snare by turns), MACHINE GUN (kick on every thirty-second), ROCK, FOUR ON THE FLOOR, HALF TIME, then the
+  song's own part. Most have a crash on the first beat of every fourth bar and a snare-and-toms fill before
+  it; E1M1 is 44 bars, so the phrases close with the song's loop. Engine patch 0022: a step is a thirty-second
+  counted through four bars (0 .. 127) and only steps with a hit get a timer (the queue holds 10).
+- VERIFIED headless (`node web/test_drums.js`, 25 checks): each pattern's hits over eight bars of the song are
+  the tables' (188, 186, 136, 196, 318, 110, 81, 58), the same at double tempo; all eight kits play; the five
+  loudnesses rise and wrap (RMS 3,400 to 13,200 with the music); no flat tops, no underruns at the game's
+  own speed. Tour recording: `web/build-fm6/doom-drum-machine-2.m4a`.
+- NOT VERIFIED: that it sounds aggressive to Sean. I cannot hear it; the figures only say that the hits now
+  stand well clear of the music and of their own tails.
+- **The route from here, if synthesised voices are not enough:** (1) recorded drum hits in place of Felucca's
+  voices for kick and snare: the usual way to a real metal kit; needs a source we may ship (CC0 or our own
+  recording) and flash: about 2 to 4 KB a hit at 22 kHz 8-bit, against 15.7 KB spare, so a kick, a snare and a
+  cymbal at most beside nothing else; (2) the game's own sounds as a kit (a shotgun for a snare), which are in
+  flash already and cost nothing; (3) more voicing of what is there.
