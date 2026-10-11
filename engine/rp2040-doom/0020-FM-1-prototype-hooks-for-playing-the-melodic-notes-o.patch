@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 22:57:13 -0700
+Subject: [PATCH] FM-1: prototype hooks for playing the melodic notes on
+ Felucca's six-operator engine (FM1_FM6, off)
+
+Under FM1_FM6 (set only by fm1-doom's prototype browser build) the music's melodic notes go to
+fm1-doom's firmware/fm1_fm6.c, which is Felucca's FM6 engine, and the chip keeps the percussion;
+the PRESETS knob's first eight clicks are that engine's factory patches. Without the flag nothing
+changes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_audio.c    |  7 +++++++
+ src/fm1/fm1_controls.c | 32 +++++++++++++++++++++++++++-----
+ src/i_oplmusic.c       | 25 +++++++++++++++++++++++++
+ 3 files changed, 59 insertions(+), 5 deletions(-)
+
+diff --git a/src/fm1/fm1_audio.c b/src/fm1/fm1_audio.c
+index ab98b03..a20e48e 100644
+--- a/src/fm1/fm1_audio.c
++++ b/src/fm1/fm1_audio.c
+@@ -40,9 +40,16 @@ audio_buffer_t *take_audio_buffer(audio_buffer_pool_t *ac, bool block)
+     return &fm1_buf;
+ }
+ 
++#if FM1_FM6
++void fm1_fm6_mix(int16_t *stereo, uint32_t frames);     // prototype: Felucca's FM engine playing the music's melodic notes
++#endif
++
+ void give_audio_buffer(audio_buffer_pool_t *ac, audio_buffer_t *buffer)
+ {
+     (void)ac;
++#if FM1_FM6
++    fm1_fm6_mix(fm1_mix, buffer->sample_count);
++#endif
+     for (uint32_t i = 0; i < buffer->sample_count; i++) {
+         uint32_t k = (fm1_w + i) & (FM1_RING_FRAMES - 1u);
+         fm1_ring[2u * k] = fm1_mix[2u * i];
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index ccb5ae3..9d310ba 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -47,6 +47,16 @@ static const uint8_t FM1_TEMPO[2 * FM1_TEMPO_STEPS + 1] = {
+     50, 53, 56, 59, 63, 67, 71, 75, 79, 84, 89, 94, 100, 106, 112, 119, 126, 133, 141, 150, 159, 168, 178, 189, 200
+ };
+ static int8_t fm1_tempo;                                     /* -FM1_TEMPO_STEPS .. FM1_TEMPO_STEPS */
++#if FM1_FM6
++// Prototype: the PRESETS knob's first eight clicks are the factory patches of Felucca's six-operator engine
++// (fm1-doom firmware/fm1_fm6.c), which then plays the melodic notes; the game's own 128 instruments follow.
++#define FM1_FM6_PATCHES 8
++extern volatile uint8_t fm1_fm6_on;
++const char *fm1_fm6_name(int n);
++#else
++#define FM1_FM6_PATCHES 0
++#endif
++static uint8_t fm1_preset;                                   /* the PRESETS knob: 0 the music's own, then the patches and instruments */
+ static uint8_t fm1_page;                                     /* what KNOB 1 .. KNOB 4 do: */
+ enum { FM1_PAGE_MAIN, FM1_PAGE_ENV, FM1_PAGE_LFO };          /* filter and resonance, pitch, tempo; the envelope; the wobble */
+ 
+@@ -195,11 +205,19 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+     }
+     // the music's instrument: PRESETS, as written at the bottom (notes already sounding keep theirs)
+     if (enc[FM1_ENC_PRESET]) {
+-        int n = fm1_turn(fm1_music_instr, enc[FM1_ENC_PRESET], 0, FM1_MUSIC_INSTRS);
+-        fm1_music_instr = (uint8_t)n;
+-        if (n) {
+-            fm1_say("MUSIC ", n, " ");
+-            fm1_say_more(fm1_music_instr_name(n - 1));
++        int n = fm1_turn(fm1_preset, enc[FM1_ENC_PRESET], 0, FM1_FM6_PATCHES + FM1_MUSIC_INSTRS);
++        fm1_preset = (uint8_t)n;
++        fm1_music_instr = (uint8_t)(n > FM1_FM6_PATCHES ? n - FM1_FM6_PATCHES : 0);
++#if FM1_FM6
++        fm1_fm6_on = (uint8_t)(n <= FM1_FM6_PATCHES ? n : 0);
++        if (fm1_fm6_on) {
++            fm1_say("FELUCCA ", n, " ");
++            fm1_say_more(fm1_fm6_name(n));
++        } else
++#endif
++        if (fm1_music_instr) {
++            fm1_say("MUSIC ", fm1_music_instr, " ");
++            fm1_say_more(fm1_music_instr_name(fm1_music_instr - 1));
+         } else
+             fm1_say("ORIGINAL MUSIC", -1, "");
+     }
+@@ -247,6 +265,10 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_filter_pos = 0;
+         fm1_filter_wobble = 0;
+         fm1_music_instr = 0;
++        fm1_preset = 0;
++#if FM1_FM6
++        fm1_fm6_on = 0;
++#endif
+         fm1_music_pitch = fm1_music_depth = 0;
+         fm1_music_adsr[0] = fm1_music_adsr[1] = fm1_music_adsr[2] = fm1_music_adsr[3] = 0;
+         fm1_tempo = 0;
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index f5154d3..5a80f0c 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -355,6 +355,14 @@ static char (*percussion_names)[32];
+ extern volatile uint8_t fm1_music_instr, fm1_music_adsr[4];
+ extern volatile int8_t fm1_music_pitch, fm1_music_depth;
+ extern volatile uint32_t fm1_music_time;
++#if FM1_FM6
++// Prototype: with fm1_fm6_on set, the melodic notes are played by Felucca's six-operator engine and not by the
++// chip (fm1-doom firmware/fm1_fm6.c); the chip keeps the percussion.
++extern volatile uint8_t fm1_fm6_on;
++void fm1_fm6_note_on(int channel, int key, int note, int velocity, int volume);
++void fm1_fm6_note_off(int channel, int key);
++void fm1_fm6_channel_off(int channel);
++#endif
+ const char *fm1_music_instr_name(int n)
+ {
+     return main_instr_names && n >= 0 && n < GENMIDI_NUM_INSTRS ? main_instr_names[n] : "";
+@@ -891,6 +899,10 @@ static void KeyOffEvent(opl_track_data_t *track, midi_event_t *event)
+     channel = TrackChannelForEvent(track, event);
+     key = event->data.channel.param1;
+ 
++#if FM1_FM6
++    fm1_fm6_note_off((int) (channel - channels), (int) key);
++#endif
++
+     // Turn off voices being used to play this key.
+     // If it is a double voice instrument there will be two.
+ 
+@@ -1226,6 +1238,15 @@ static void KeyOnEvent(opl_track_data_t *track, midi_event_t *event)
+     }
+     else
+     {
++#if FM1_FM6
++        if (fm1_fm6_on)
++        {
++            fm1_fm6_note_on((int) (channel - channels), (int) key,
++                            (int) note + fm1_music_pitch, (int) volume,
++                            (int) channel->volume);
++            return;
++        }
++#endif
+         instrument = channel->instrument;
+ #if FM1
+         if (fm1_music_instr)
+@@ -1393,6 +1414,10 @@ static void AllNotesOff(opl_channel_data_t *channel, unsigned int param)
+ {
+     int i;
+ 
++#if FM1_FM6
++    fm1_fm6_channel_off((int) (channel - channels));
++#endif
++
+     for (i = 0; i < voice_alloced_num; i++)
+     {
+         if (voice_alloced_list[i]->channel == channel)

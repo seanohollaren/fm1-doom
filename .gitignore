@@ -16,6 +16,7 @@ tiny.whd.h
 # build output
 /host-build/
 /web/build/
+/web/build-fm6/
 /firmware/build/
 /sizecheck/obj/
 /sizecheck/*.elf
