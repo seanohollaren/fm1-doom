@@ -98,14 +98,16 @@ describe.skipIf(!existsSync(source))('the controls table against the firmware so
     }
     expect(Object.keys(keys).length).toBeGreaterThan(8)
     expect(KEYS).toEqual(keys)
-    // EDIT is handled outside the map, in code. So are SCL and ENV (picture shape, frame rate), which the page
-    // leaves out on purpose; LFO does nothing any more.
-    expect(c).toContain('FM1_BTN_EDIT)')
-    buttons.EDIT = 'sound'
+    // EDIT and ENV are handled outside the map, in code. So are SCL and GLO (picture shape, frame rate), which the
+    // page leaves out on purpose; LFO does nothing any more.
+    for (const b of ['EDIT', 'ENV']) {
+      expect(c).toContain(`FM1_BTN_${b})`)
+      buttons[b] = 'sound'
+    }
     expect(c).not.toContain('FM1_BTN_LFO')
     // the knobs: every encoder the firmware reads is in the table, and no other
     const read = new Set([...c.matchAll(/enc\[FM1_ENC_(\w+)\]/g)].map((m) => m[1]))
-    const NAME: Record<string, string> = { SELECT: 'SELECT', PRESET: 'PRESETS', K1: 'KNOB 1', K2: 'KNOB 2', K3: 'KNOB 3', K4: 'KNOB 4' }
+    const NAME: Record<string, string> = { SELECT: 'SELECT', PRESET: 'PRESETS', ALGO: 'ALGORITHM', K1: 'KNOB 1', K2: 'KNOB 2', K3: 'KNOB 3', K4: 'KNOB 4' }
     expect([...read].map((k) => NAME[k]).sort()).toEqual(Object.keys(KNOBS).filter((k) => k !== 'MASTER').sort())
     expect(BUTTONS).toEqual(buttons)
   })
