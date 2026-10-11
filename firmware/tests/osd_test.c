@@ -13,7 +13,7 @@ static uint16_t swap(uint16_t v) { return (uint16_t)(v << 8 | v >> 8); }
 
 /* every message the firmware can make, and every instrument name the game has, must fit and be legible */
 static const char *const SAID[] = {
-    "LOW PASS 955 HZ", "HIGH PASS 8000 HZ", "FILTER OFF", "RESONANCE 7", "MUSIC AS WRITTEN", "MUSIC 87 LEAD 7 (5TH SAWTOOTH)",
+    "LOW PASS 955 HZ", "HIGH PASS 8000 HZ", "FILTER OFF", "RESONANCE 7", "ORIGINAL MUSIC", "MUSIC 87 LEAD 7 (5TH SAWTOOTH)",
     "MUSIC 27 * Electric Guitar (clean)", "MUSIC 128 Rhodes Paino", "FM DEPTH +8", "FM DEPTH -3", "FM DEPTH AS WRITTEN", "PITCH -12",
     "TEMPO 200%", "ENVELOPE SHORT 6", "ENVELOPE LONG 1", "ENVELOPE AS WRITTEN", "WOBBLE 0.35 HZ: TURN KNOB 1 TOO", "WOBBLE 5.6 HZ",
     "WOBBLE OFF", "KNOBS 3 AND 4: ENVELOPE, WOBBLE", "KNOBS 3 AND 4: PITCH, TEMPO", "SOUND AS IT WAS", "VIEW 240 X 150",

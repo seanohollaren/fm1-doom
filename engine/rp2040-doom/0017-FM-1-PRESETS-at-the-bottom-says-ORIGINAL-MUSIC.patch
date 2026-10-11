@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 21:19:49 -0700
+Subject: [PATCH] FM-1: PRESETS at the bottom says ORIGINAL MUSIC
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_controls.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 66e09e4..55df328 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -188,7 +188,7 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+             fm1_say("MUSIC ", n, " ");
+             fm1_say_more(fm1_music_instr_name(n - 1));
+         } else
+-            fm1_say("MUSIC AS WRITTEN", -1, "");
++            fm1_say("ORIGINAL MUSIC", -1, "");
+     }
+     // FM depth: ALGORITHM
+     if (enc[FM1_ENC_ALGO]) {
