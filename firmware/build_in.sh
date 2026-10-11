@@ -36,6 +36,7 @@ touch $STAMP
    --start-group /opt/jieli/pi32v2/lib/libc.a /opt/jieli/pi32v2/lib/libcompiler-rt.a /opt/jieli/pi32v2/lib/libm.a --end-group -Map $OUT/doom.map -o $OUT/doom.elf 2>$OUT/link.err || { sort -u $OUT/link.err | head -60; exit 1; }
 /opt/jieli/common/bin/objdump -h $OUT/doom.elf | grep -E "^ +[0-9]+ \." 
 /opt/jieli/common/bin/objdump -t $OUT/doom.elf > $OUT/doom.syms
+/opt/jieli/common/bin/objdump -d $OUT/doom.elf > $OUT/doom.dis    # every time: a listing from an older build misleads
 for s in text ram_text data; do /opt/jieli/common/bin/objcopy -O binary -j .$s $OUT/doom.elf $OUT/$s.bin; done
 # identity of the recovery core: the device unit, Felucca's start-up / vector / interrupt stubs and the memory map.
 # The same id as a build that has already run on the device = the same recovery code (before linking).

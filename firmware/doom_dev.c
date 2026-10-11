@@ -109,6 +109,10 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
 #include "dev_volume.h"                  /* the MASTER knob -> gain, as Felucca maps it */
 static volatile uint32_t dev_gain_q12;   /* what the audio interrupt multiplies by; written by the game loop only */
 static int32_t dev_knob16;               /* the knob x16, smoothed */
+#include "fm1_filter.h"                  /* rp2040-doom/src/fm1: the filter KNOB 1 and KNOB 2 play with (fm1_controls.c) */
+#include "fm1_drive.h"                   /* ... and the drive on KNOB 3, ahead of it */
+static fm1_filter_t dev_filter;          /* touched by the audio interrupt only */
+static fm1_drive_t dev_drive;            /* the same */
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static int16_t apcm[HALF_WORDS];
 
@@ -142,6 +146,8 @@ void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
         int32_t *o = &abuf[fm1_audio_free_half() * HALF_WORDS];
         uint32_t i, g = dev_gain_q12;
         fm1_audio_read(apcm, HALF_FRAMES, OUT_RATE);         /* resampled from the game's ring (fm1_audio.c) */
+        fm1_drive_run(&dev_drive, apcm, HALF_FRAMES, fm1_drive_amt);                       /* off: returns at once */
+        fm1_filter_run(&dev_filter, apcm, HALF_FRAMES, fm1_filter_pos, fm1_filter_res);   /* ... and so does this */
         for (i = 0; i < HALF_WORDS; i++)
             o[i] = dv_sample(apcm[i], g);
         fm1_audio_ack_half();
@@ -213,27 +219,19 @@ static int ota_prog(uint32_t off, const void *p, uint32_t n)
 }
 static int ota_fread(uint32_t off, void *p, uint32_t n) { return flash_ok ? st_read(off, p, n) : -8; }
 /* The screen link's clock is lsb / (n + 1); Felucca runs it at n = 4 ("12 MHz", so lsb is taken to be 60 MHz).
- * The game may step through faster settings (LFO button); every screen this file draws itself goes out at
- * Felucca's proven rate. */
-static const uint8_t DEV_LCD_BAUD[] = {LCD_BAUD, 2, 1, 0};
-static uint8_t dev_lcd_i;                /* the rate set now */
-static uint8_t dev_lcd_game = 3;         /* the rate the game's picture goes out at: the fastest step ("60 MHz"), clean
-                                          * and smooth on Sean's unit 2026-10-09; LFO steps on from it */
-static void dev_lcd_rate(uint32_t i)
+ * The game's picture goes out at n = 0 ("60 MHz"): clean and smooth on Sean's unit 2026-10-09, and the link is
+ * what limits the frame rate. Every screen this file draws itself goes out at Felucca's proven rate. */
+#define DEV_LCD_GAME 0u
+static uint8_t dev_lcd_fast;             /* the game's rate is set now */
+static void dev_lcd_rate(uint32_t fast)
 {
     lcd_sync();                          /* no transfer in flight while the clock changes */
-    dev_lcd_i = (uint8_t)i;
-    fm1_lcd_baud(DEV_LCD_BAUD[i]);
-}
-int fm1_lcd_speed_next(void)
-{
-    dev_lcd_game = (uint8_t)((dev_lcd_game + 1u) % sizeof DEV_LCD_BAUD);
-    dev_lcd_rate(dev_lcd_game);
-    return (int)(60u / (DEV_LCD_BAUD[dev_lcd_game] + 1u));
+    dev_lcd_fast = (uint8_t)fast;
+    fm1_lcd_baud(fast ? DEV_LCD_GAME : LCD_BAUD);
 }
 static void dev_screen(uint16_t c)
 {
-    if (dev_lcd_i)
+    if (dev_lcd_fast)
         dev_lcd_rate(0);
     lcd_fill(0, 0, 240, 240, c);
 }
@@ -482,8 +480,8 @@ static void dev_data_request(uint32_t len, uint32_t crc, uint32_t flags)
 /* ------------------------------------------------------------------ the game's platform interface --- */
 void fm1_lcd_blit(unsigned x, unsigned y, unsigned w, unsigned h, const uint16_t *px)
 {
-    if (dev_lcd_i != dev_lcd_game)
-        dev_lcd_rate(dev_lcd_game);      /* (one of this file's own screens was drawn since: back to the game's rate) */
+    if (!dev_lcd_fast)
+        dev_lcd_rate(1);                 /* (one of this file's own screens was drawn since: back to the game's rate) */
     lcd_blit(x, y, w, h, px);            /* waits for the previous strip's DMA, starts this one and returns: the game
                                           * composes the next strip (in its other buffer) while this one goes out */
 }

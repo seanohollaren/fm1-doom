@@ -4,29 +4,18 @@
   container-type: inline-size;
 }
 
+/* the drawing across the whole width; under it what each colour means, in two columns: what the hands do while
+   playing on the left, the menu and the sound on the right */
 .controls__list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 1.1rem 2rem;
-  align-content: start;
-}
-
-.controls__layout {
-  display: grid;
-  gap: 1.75rem;
-}
-
-/* room for both: the drawing on the left, what it means beside it */
-@container (min-width: 58rem) {
-  .controls__layout {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    gap: clamp(2rem, 4vw, 3.5rem);
-    align-items: start;
-  }
+  columns: 2;
+  column-gap: clamp(1.5rem, 5cqi, 4rem);
+  margin-bottom: -1.25rem;
 }
 
 .controls__group {
   --g: var(--ink);
+  break-inside: avoid;
+  margin-bottom: 1.25rem;
   padding-top: 0.7rem;
   border-top: 2px solid var(--g);
   transition: opacity 0.18s var(--ease);
@@ -54,12 +43,13 @@
 }
 .controls__group.g-menu {
   --g: var(--g-menu);
+  break-before: column;
 }
-.controls__group.g-view {
-  --g: var(--g-view);
+.controls__group.g-volume {
+  --g: var(--g-volume);
 }
-.controls__group.g-filter {
-  --g: var(--g-filter);
+.controls__group.g-sound {
+  --g: var(--g-sound);
 }
 
 .controls__name {
@@ -96,4 +86,13 @@
 
 .controls__row dd {
   color: var(--ink-soft);
+}
+
+@container (max-width: 32rem) {
+  .controls__list {
+    columns: 1;
+  }
+  .controls__group.g-menu {
+    break-before: auto;
+  }
 }

@@ -45,8 +45,8 @@
   --g-use: #e2a43c;
   --g-weapon: #b98fd0;
   --g-menu: #79b85c;
-  --g-view: #9a9186;
-  --g-filter: #45c4b0;
+  --g-volume: #9a9186;
+  --g-sound: #45c4b0;
   --on-group: #14110f;
 
   /* the FM-1's own screen colours (firmware/doom_dev.c), for the small swatches */

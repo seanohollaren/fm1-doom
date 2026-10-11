@@ -1468,3 +1468,162 @@ Sean asked for both: a name that is not Felucca's, and the real volume knob.
 - NOT VERIFIED until it runs on the FM-1: that the knob's direction and range feel right (the mapping is
   Felucca's, so it should match the synth), that full volume does not distort on the speaker, and how the Mac
   names the MIDI port after the change (it may keep showing the old name for a while).
+
+## 2026-10-09 ~23:30 — Build "b7": a filter over the game's sound on two knobs (built and Mac-tested; NOT installed)
+
+Sean's idea: this is a synthesizer, so let a knob filter the game's sound while it plays. A party trick.
+
+- **What it is.** KNOB 1 sweeps: left of centre a low-pass closing from 8 kHz down to 80 Hz, right of centre a
+  high-pass opening from 80 Hz up to 8 kHz, 40 steps each side in equal ratios, the centre off. Crossing the
+  centre stops at off (one more click continues). KNOB 2 is the resonance, 8 settings (Q 0.7 to 8), starting at
+  3. EDIT turns the filter off. Each change is said on the game's message line (only while a level is up).
+- **Where.** `rp2040-doom/src/fm1/fm1_filter.h` (engine patch 0012): a state-variable filter in its trapezoidal
+  form, stable at every setting, fixed point with 64-bit products. `fm1_controls.c` owns the two settings; the
+  device's audio interrupt (`doom_dev.c`) and the browser build's audio callback run it on each block, before
+  the volume. Off returns without touching a sample, so with the knob at the centre the sound path is b6's.
+- VERIFIED in the b6 disassembly first: the CPU multiplies 32x32 into 64 bits in one instruction
+  (`r1_r0 = r1 * r0 (s)`, as the engine's own FixedMul compiles), so 64-bit fixed point costs nothing special.
+- **Cost** (from the b7 disassembly): at most 73 instructions per sample of one channel, 6.4 million a second
+  while the filter is on, none while it is off. The first version of the loop (64-bit saturation, both channels
+  in one loop) was 120 and was rewritten. The CPU's clock is still unknown, so what that costs in frame rate is
+  for the device to say: ENV shows the rate with the filter off and on.
+- **Tests.** `firmware/tests/filter_test.c` (21 checks): the cutoff sits where the table says along the whole
+  knob (-3 dB there within 0.35 dB), resonance peaks as computed (13.1 dB at the top setting, both sides), off
+  is bit-exact, full-scale square noise at top resonance with the knob jumping about cannot push the state to
+  its guard, silence in gives silence out, turning through off under a steady tone makes no click, channels are
+  separate. `web/test_filter.js`: in the browser build with the level's music playing, low-pass cuts the top of
+  the sound to 1/60, high-pass the bottom to 1/180, EDIT restores it, no audio underruns. The headless gameplay
+  test is unchanged (2 awake, health 25 at t = 13).
+- b7 = b6 + the filter: firmware 268,428 B, recovery core id `3366af9307ab58fe`, build id `80d062fa`;
+  `doom_part1.fwsc` SHA-256 `2ab6deb5…df741f75b`, `doom_code.fwsc` `ef16ba8d…d8c6405c`; data block 2 unchanged.
+  18 package runs pass; predicted flash passes `check_dump.py`. Symbols: `firmware/installed_2ab6deb5/`
+  (b6's packages are kept in `firmware/installed_b2ed37e8/`). Source commit `7dcc819`.
+- The engine patch series is now written without "[PATCH n/m]" in the subjects, so adding a patch no longer
+  rewrites the earlier files. VERIFIED again: the series on upstream `29a453c` gives the local branch's tree.
+- NOT VERIFIED until it runs on the FM-1: how it sounds on the speaker (the bottom half of the low-pass may leave
+  little a small speaker can play), how many clicks of the knob a sweep takes, whether KNOB 1 and KNOB 2 are the
+  encoders the HAL's numbering says, and the frame rate with the filter on.
+- Local test pages (production builds, static): b6 on port 5183 (`dist-b6`), b7 on port 5184 (`dist-b7`). The
+  site in the pull request still serves b5; the working tree holds b7 and its page text, uncommitted.
+
+## 2026-10-10 — Build "b8": a new keyboard layout; no screen link speed button (built and Mac-tested; NOT installed)
+
+Sean's changes after playing b7 (b7 is what `main` and the live site serve, pull request #2).
+
+- **Repository state found first.** `main` served b7 but did not hold its source: the three b7 commits
+  (`83f3af3`, `7dcc819`, `cbf6afe`) were pushed to `work` after pull request #1 had merged, and pull request #2
+  carried only the site's copy of the build. Branch `controls-b8` (off `main`) starts by merging `work`, so
+  engine patch 0012, the filter tests and the b7 notes are back in line. The same pull request #2 had also
+  committed `site/frontend/dist-b7/` (my local test build, 25 files, no game data): no longer tracked.
+- **Layout** (engine patch 0013, `fm1_controls.c`). Left hand, the six lowest keys: F#3 turn left, G#3 forward,
+  A#3 turn right; under them F3 strafe left, G3 back, A3 strafe right. Right hand: F5 fire, G5 use, F#5 run.
+  REC still fires. Nothing now: B3, C4 (were turn right, strafe right), D5, E5 (were a second use and fire).
+  The low F# no longer runs: it turns.
+- **Screen link.** The LFO button stepped the link's clock down from the fastest rate; it only made the
+  picture slower. Gone: `fm1_lcd_speed_next` is removed from the engine and from `doom_dev.c`, which now knows
+  two rates, the game's (n = 0, "60 MHz", the default since b5) and Felucca's for its own screens. SCL (picture
+  shape) and ENV (frame rate) still work; the site no longer mentions them.
+- VERIFIED in the browser build, `node web/test_controls.js` (new): each key held in E1M1 and the player's
+  position and facing read back: forward +116, back -116, strafe left -106, strafe right +111 (map units in
+  0.4 s), turn left +28/256 of a circle, turn right -28, forward with F#5 held 232 (twice the walk); B3, C4, D5,
+  E5 change nothing. Gameplay test unchanged (2 awake, health 25 at t = 13); filter-in-game test passes;
+  picture-shape test passes (its LFO step removed).
+- b8: firmware 268,232 B (-196 B), recovery core id `182d9edc7bc9cbce` (the device unit changed), build id
+  `2aee13da`; `doom_part1.fwsc` SHA-256 `cd171ebf…5f8d1e4b`, `doom_code.fwsc` `9376e017…7d6e0075`; data block 2
+  unchanged (`e4dcdbba…`). Block 1 has 18,264 B spare. 18 package runs pass (`firmware/test.sh`); the
+  predicted flash after b8 over b7 (138 app sectors change, nothing outside the app area) passes
+  `check_dump.py`. Symbols: `firmware/installed_cd171ebf/`. Source commit `ff38dea`.
+- Build note: `firmware/pack.py` needs `JIELI_TOOLCHAIN=$HOME/.jieli/toolchain AC79_SDK=$HOME/fw-AC79_AIoT_SDK`
+  in the environment (for the loader variant), as Felucca's build does.
+- Site (branch only): serves `doom-b8.fwsc`; the drawing and list show the new layout; the "Picture and sound"
+  group is now "Volume" (MASTER alone). 32 site tests pass, production build is clean.
+- NOT VERIFIED until it runs on the FM-1: that the layout feels right in the hand, and nothing else — the
+  screen link rate is the one b5 to b7 already used.
+- ASSUMED: Sean has run b7 on the device (he merged it and came back with layout changes); he has not said so.
+
+## 2026-10-10 — Site: the controls drawing full width with labelled keys; a real screenshot on its screen
+
+- The drawn FM-1 spans the controls section; the list is under it in two columns. Each note key the game uses
+  carries its action (one word, or two with a line each); a button or knob the game uses explains itself under
+  the pointer. `KEY_LABELS` and `TIPS` in `site/frontend/src/lib/controls.ts`; a test holds them to the keys,
+  buttons and knobs the table lists.
+- The screen of the drawn FM-1 showed a drawing made for the page. Sean asked for a real picture:
+  `site/capture_screen.js` (new) runs the firmware's browser build headless, starts a game through the panel
+  and writes the panel's 240x240 picture two seconds after the level appears to
+  `site/frontend/src/assets/e1m1-start.png` (25,735 B, 492 colours: the 320-to-240 scaler blends). VERIFIED: two
+  runs give the same file (SHA-256 `fcaa2e16…bbe93903`).
+- **This is the first piece of id Software's artwork in the repository and on the site** (Sean's request). It
+  is a screenshot of the shareware level, not game data: the rule against committing or hosting a WAD or
+  anything cut from one stands, and CI's check for game data in the build is unchanged.
+- The drawn screen is now the panel pixel for pixel (240x240, was a 60x60 grid scaled up): the plain-colour
+  screens are painted in 4x4 cells, so they look as before, and the melt moves in the same cells.
+
+## 2026-10-10 — Build "b9": drive on KNOB 3, the music's instrument on PRESETS (built and Mac-tested; NOT installed)
+
+Sean asked what else a spare knob could do to the sound; of the ideas he picked drive and the instrument swap.
+
+- VERIFIED in the source: three encoders were free, not one (KNOB 3, PRESETS, ALGORITHM), and the music is played
+  by an emulated FM chip (`i_oplmusic.c` over the OPL emulator), each MIDI channel on one of the 128 melodic
+  instruments of the game's GENMIDI lump, which also holds their names. ALGORITHM is still free.
+- **Drive** (`rp2040-doom/src/fm1/fm1_drive.h`, engine patch 0014). KNOB 3: off, then 16 steps. Each step is
+  more gain (4 to 64 times, equal ratios) into a soft clipper (y = 1.5x - 0.5x^3), then a level back down. It
+  runs on each block ahead of the filter, in the audio interrupt (`doom_dev.c`) and in the browser build. A step
+  is ramped across the block, off/on is a crossfade, and off returns without touching a sample.
+- MEASURED first, in the browser build: E1M1's music is quiet against full scale (RMS 1583 of 32768, peaks
+  10,696; pistol shots peak 15,104). That is why the gain starts at 4: below it nothing would clip. The 16 levels
+  were set on five seconds of that music so that its RMS comes out 1 dB up at step 1 and 4 dB up at step 16.
+  At step 16 nearly half the samples are flat-topped and the loudest sample is 3549, a third of the clean
+  music's peaks: loud sounds (shots) are squashed down to the music's level, as heavy distortion does.
+- **Cost** (from the b9 disassembly): the drive loop is 56 instructions a stereo frame, 28 per sample of one
+  channel, 2.5 million a second while it is on, none while off. With the filter on as well: about 101 per
+  sample, 8.9 million a second. The CPU's clock is still unknown; ENV shows the frame rate.
+- **Instrument** (`i_oplmusic.c`, 6 lines under `#if FM1`). PRESETS: at the bottom the music is as written; each
+  click up plays every melodic note on the next of the 128 instruments, and the message line says its number
+  and name. Percussion is left alone. Notes already sounding keep their instrument until they end. No cost
+  per sample. VERIFIED: as written E1M1 uses instruments 29, 30 and 34 (two guitars and a bass).
+- **EDIT** now turns off all three (filter, drive, instrument) and says "SOUND AS IT WAS".
+- Tests. `firmware/tests/drive_test.c` (new, 20 checks): off is bit-exact; the clipper never makes a louder
+  sample quieter, is the same both ways up, never exceeds its step's level for any input; a tone at the music's
+  level gets no quieter and no cleaner with each step (+1.3 dB at step 1, +6.7 dB at step 16, third harmonic
+  0.7 % then 32 %, a square wave's being 33 %); full scale in stays in range; silence stays silence; turning
+  through off and up and down makes no click; channels are separate. `web/test_sound_knobs.js` (new), on the
+  game's music: one click rounds the peaks (peak/RMS 6.6 to 3.1), the top step squares it (1.26, peak exactly
+  3549, +4.8 dB), back down restores it; PRESETS up 20 puts every melodic voice on instrument 19, far past the
+  top stops at 127, EDIT brings back 29, 30, 34 and the clean sound; no underruns. Gameplay, layout and filter
+  tests unchanged.
+- b9: firmware 268,992 B (+760 B), recovery core id `3088e3cfe01c1599`, build id `785d78fe`; `doom_part1.fwsc`
+  SHA-256 `ef6a2897…e1792a08`, `doom_code.fwsc` `489851ec…cae008c3`; data block 2 unchanged. Block 1 has
+  17,496 B spare. 19 package runs pass; the predicted flash (138 app sectors change, nothing else) passes
+  `check_dump.py`. VERIFIED: a clean rebuild from the committed source gives the same two files. Symbols:
+  `firmware/installed_ef6a2897/`. Source commit `1118d9e`.
+- DEAD END avoided: `firmware/build/doom.dis` was from 2026-10-09; the build never rewrote it, so b8's copy in
+  `installed_cd171ebf/` was an older build's listing (now regenerated from b8's own ELF). `build_in.sh` writes
+  the listing on every build from now on.
+- NOT VERIFIED until it runs on the FM-1: how drive sounds on the speaker and whether 4 dB at the top is too
+  much or too little; whether KNOB 3 and PRESETS are the encoders the HAL's numbering says; the frame rate with
+  drive and filter both on; whether some instruments are too quiet to be worth stopping on.
+
+## 2026-10-10 — Do b8 and b9 raise the risk of a brick? (Sean's question; answered on the Mac)
+
+- New: `tools/core_diff.py OLD_DIR NEW_DIR` compares the recovery core of two builds (start-up code, vectors,
+  interrupt stubs, `doom_dev.o` with the Felucca sources in it) function by function, as instruction text with
+  link addresses masked. Reads `doom.map` and `doom.dis` only.
+- VERIFIED, b7 (`installed_2ab6deb5`) against b9 (`installed_ef6a2897`): of b7's 70 recovery-core functions, 57
+  are the same instructions; 10 more are the same instructions with their variables 16 bytes further on (the
+  drive's 16 bytes of state), among them `fm1_cstart` (boot, the choice of safe mode, the safe-mode loop),
+  `dev_service` (watchdog, boot guard, the boot-mode chord), `usb_start`, `fm1_timer5_irq` and the update
+  protocol's functions; `fm1_lcd_speed_next` is gone; two have different code: `fm1_alnk0_irq` (the audio
+  interrupt, which now runs the drive) and `fm1_lcd_blit` (the game's picture, always at the fastest rate).
+- VERIFIED in the source: both of those run in game mode only. The audio interrupt is attached inside
+  `if (dev_mode == MODE_GAME)`; `fm1_lcd_blit` is called only from the game's video code. Safe mode never
+  reaches either. The drive is off at power-on, so its loop does not run until KNOB 3 is turned.
+- So the worst a fault in the new code can do is stop or spoil the game while it runs: the watchdog or the
+  fault handler restarts it, a start that dies in its first 30 s comes back in safe mode (amber), and HOME held
+  at switch-on gives safe mode (cyan) before any game code runs. The ladder below that is unchanged and was
+  not touched: three failed starts or three minutes unheard in safe mode lead to the chip's boot mode, where
+  `fm1restore.py` writes the backup (read and sector write VERIFIED on the device 2026-10-09; a whole restore
+  has never been needed, so never run).
+- What stays as it always was: an install rewrites the whole application area, recovery core included, through
+  Felucca's loader. That risk belongs to every install (b5, b6, b7 too), not to these features.
+- ASSUMED, not said by Sean: that b7 has run on his FM-1. The comparison is against b7 because it is the build
+  on `main`; if he last ran another build, the same check against that build's `installed_*` directory applies.

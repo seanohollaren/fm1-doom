@@ -15,6 +15,7 @@ export function Hero() {
       </h1>
       <p className="hero__lede">
         The first level of Doom, complete with music and sound and some filters for fun. Flashable from the browser.
+        Special thanks to Felucca.
       </p>
     </div>
   )

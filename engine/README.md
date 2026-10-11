@@ -1,7 +1,7 @@
 # The engine source
 
 The game engine is [rp2040-doom](https://github.com/kilograham/rp2040-doom) by Graham Sanderson (itself built on
-Chocolate Doom), with the FM-1 work on top of it. That work is the patch series in `rp2040-doom/`: eleven commits
+Chocolate Doom), with the FM-1 work on top of it. That work is the patch series in `rp2040-doom/`: fourteen commits
 against upstream commit `29a453c` (branch `rp2`, 2024-08-11), exported with `git format-patch`.
 
 ```bash
@@ -15,7 +15,7 @@ To update the series after new commits on `fm1-port`:
 
 ```bash
 rm engine/rp2040-doom/*.patch
-git -C rp2040-doom format-patch --zero-commit --no-signature -o "$PWD/engine/rp2040-doom" 29a453c..fm1-port
+git -C rp2040-doom format-patch -N --zero-commit --no-signature -o "$PWD/engine/rp2040-doom" 29a453c..fm1-port
 ```
 
 No game data is in the series, and none may be added: `src/tiny.whd.h` (the embedded data of a host or browser

@@ -21,6 +21,7 @@ away or go bad without harm: the visitor is told to use their own copy. Each mir
 | `frontend/src/lib/useInstaller.ts` | All the page's state: the file, the connection, the install run. |
 | `../web/*.js` | The install logic itself, shared with the single-file page (`web/installer.html`): `wadcut.js` (cut a WAD), `convert.js` (run the converter), `datapack.js` (pack), `install.js` (the install flow over MIDI), `vendor/felucca/` (Felucca's package and update-protocol code, unmodified). The site imports them as `@fm1/...`. |
 | `frontend/public/firmware`, `public/whdgen`, `src/firmware.json` | **Committed build outputs**: the firmware-only package, rp2040-doom's data converter as WebAssembly, and their hashes. Written by `sync_firmware.py`. |
+| `capture_screen.js`, `frontend/src/assets/e1m1-start.png` | The picture on the drawn FM-1's screen: the panel two seconds after E1M1 appears, taken from the firmware's browser build (`sh web/build.sh`, then `node site/capture_screen.js`). A screenshot, and the only piece of id Software's artwork in the repository. |
 | `make_logo.py`, `art/` | The "FM-1" lettering (steel over gold brick, drawn from scratch by the script): the full logo (`art/fm1-logo.svg`) and the tab icon (`frontend/public/favicon.svg`). |
 | `security-headers.json` | The content security policy and permissions policy. CloudFront sends them; `npm run preview` sends the same. |
 | `infra/` | CDK: `DoomSiteCertStack` (us-east-1, for CloudFront) and `DoomSiteFrontendStack` (us-west-2: bucket, distribution, DNS). |

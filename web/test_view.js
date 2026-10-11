@@ -1,4 +1,4 @@
-// Headless check of the three picture shapes (SCL button), the frame-rate line (ENV) and the link-speed line (LFO):
+// Headless check of the three picture shapes (SCL button) and the frame-rate line (ENV):
 // starts E1M1 through the panel model, then for each shape reports which panel rows hold picture and writes a PNG.
 //   node web/test_view.js OUT_DIR
 const path = require('path'), fs = require('fs'), zlib = require('zlib');
@@ -15,7 +15,7 @@ globalThis.Module = {
   locateFile: f => path.join(__dirname, 'build', f),
   print: s => { if (/Error|error|panic/.test(s)) console.log('[game]', s); },
   onRuntimeInitialized() {
-    const M = globalThis.Module, B = n => 1 << n, PLAY = B(10), SCL = B(1), ENV = B(2), LFO = B(3);
+    const M = globalThis.Module, B = n => 1 << n, PLAY = B(10), SCL = B(1), ENV = B(2);
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const tap = async b => { M._fm1_web_panel(0, b); await sleep(150); M._fm1_web_panel(0, 0); await sleep(350); };
     const shot = name => {
@@ -35,7 +35,6 @@ globalThis.Module = {
       await tap(SCL); await sleep(300); shot('view2-full-with-message');
       await tap(SCL); await sleep(300); shot('view0-again');
       await sleep(4500); await tap(ENV); await sleep(200); shot('fps-message');
-      await sleep(4500); await tap(LFO); await sleep(200); shot('link-message');
       console.log('DONE'); process.exit(0);
     })();
   },
