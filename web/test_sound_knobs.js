@@ -1,14 +1,15 @@
 // Headless check, in the browser build with E1M1's music playing, of the knobs that play with the music itself:
-// PRESETS (instrument), ALGORITHM (FM depth), KNOB 3 (pitch) and KNOB 4 (tempo); of ENV, which turns KNOB 3 and
-// KNOB 4 into envelope and filter wobble and back; and of EDIT, which puts all of it back.
+// PRESETS (instrument), ALGORITHM (FM depth), KNOB 3 (pitch) and KNOB 4 (tempo); of ENV, which turns the four
+// knobs into attack, decay, sustain and release, and LFO, which turns KNOB 1 into the filter's wobble, and back;
+// and of EDIT, which puts all of it back.
 //   node web/test_sound_knobs.js
 const path = require('path');
 globalThis.Module = {
   locateFile: f => path.join(__dirname, 'build', f),
   print: s => { if (/Error|error|panic/.test(s)) console.log('[game]', s); },
   onRuntimeInitialized() {
-    const M = globalThis.Module, PLAY = 1 << 10, EDIT = 1 << 4, ENV = 1 << 2;
-    const SELECT = 0, ALGORITHM = 1, PRESETS = 2, K1 = 3, K3 = 5, K4 = 6;
+    const M = globalThis.Module, PLAY = 1 << 10, EDIT = 1 << 4, ENV = 1 << 2, LFO = 1 << 3;
+    const SELECT = 0, ALGORITHM = 1, PRESETS = 2, K1 = 3, K2 = 4, K3 = 5, K4 = 6;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const tap = async b => { M._fm1_web_panel(0, b); await sleep(150); M._fm1_web_panel(0, 0); await sleep(350); };
     const turn = async (knob, steps) => { M._fm1_web_enc(knob, steps); await sleep(200); };
@@ -40,6 +41,8 @@ globalThis.Module = {
       return { inst: [...inst].sort((a, b) => a - b), mod, up };
     };
     const all = (v, n) => v.up.length > 20 && v.up.filter(u => u === n).length >= v.up.length * 0.97;   // (a few notes are caught mid-bend)
+    // where the filter is, watched for a while: lowest and highest position, in knob steps
+    const filterIn = async ms => { let lo = 1e9, hi = -1e9; for (let t = 0; t < ms; t += 25) { const a = M._fm1_web_filter_at() / 256; lo = Math.min(lo, a); hi = Math.max(hi, a); await sleep(25); } return { lo, hi }; };
     const ticksIn = async ms => { const a = M._fm1_web_music(3, 0), t = Date.now(); await sleep(ms); return (M._fm1_web_music(3, 0) - a) * 1000 / (Date.now() - t); };
     let bad = 0;
     const check = (name, ok, more = '') => { if (!ok) bad++; console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}${more ? ': ' + more : ''}`); };
@@ -97,45 +100,73 @@ globalThis.Module = {
       await turn(ALGORITHM, 8); await sleep(2500);
       check('... eight up again: as written', depth(await voices(3000), 0));
 
-      // ---- ENV: KNOB 3 and KNOB 4 become envelope and wobble
+      // ---- ENV: the four knobs become attack, decay, sustain, release
+      // (what 5, 6, 7 of the probe: the flags, attack << 4 | decay and sustain << 4 | release last written to a voice)
+      const env = () => ({ held: (M._fm1_web_music(5, 0) >> 5) & 1, attack: M._fm1_web_music(6, 0) >> 4, decay: M._fm1_web_music(6, 0) & 15, sustain: M._fm1_web_music(7, 0) >> 4, release: M._fm1_web_music(7, 0) & 15 });
       const before = await listen(4000);
       await tap(ENV);
-      await turn(K3, -6); await sleep(1500);
-      const short = await listen(4000), pitchKept = await voices(2500);
-      check('after ENV, KNOB 3 down six: every note is a tick (a quarter as loud at most, coming and going far more)', short.rms < before.rms * 0.25 && short.swing > before.swing + 10,
-        `rms ${short.rms.toFixed(0)} against ${before.rms.toFixed(0)}; level swing ${short.swing.toFixed(1)} dB against ${before.swing.toFixed(1)} dB`);
-      check('... and the pitch is not touched by it', all(pitchKept, own));
-      await turn(K3, 30); await sleep(2500);
-      const long = await listen(4000);
-      await turn(K3, -6); await sleep(2500);
+      await turn(K2, 1); await sleep(1500);
+      const pluck = await listen(4000), e1 = env();
+      check('after ENV, KNOB 2 one click: decay rate 8, every note a pluck (quieter, the level coming and going more)', e1.decay === 8 && pluck.rms < before.rms * 0.75,
+        `rms ${pluck.rms.toFixed(0)} against ${before.rms.toFixed(0)}; level swing ${pluck.swing.toFixed(1)} dB against ${before.swing.toFixed(1)} dB`);
+      await turn(K2, 30); await sleep(300);
+      check('... far past the top: rate 1, the slowest', env().decay === 1);
+      await turn(K2, -30); await sleep(300);
+      await turn(K1, 4); await sleep(300);
+      check('KNOB 1 four clicks: attack rate 3', env().attack === 3);
+      await turn(K1, 30); await sleep(300);
+      check('... far past the top: rate 1', env().attack === 1);
+      await turn(K1, -30); await sleep(300);
+      await turn(K3, 1); await sleep(300);
+      const s1 = env();
+      await turn(K3, 5); await sleep(1500);
+      const s6 = env(), held = await listen(4000);
+      check('KNOB 3: sustain from silence up through 4 units down (12 dB), the note held there', s1.sustain === 15 && s1.held === 1 && s6.sustain === 4 && s6.held === 1, `rms ${held.rms.toFixed(0)}`);
+      await turn(K3, 30); await sleep(300);
+      check('... far past the top: full level', env().sustain === 0);
+      await turn(K3, -30); await sleep(300);
+      await turn(K4, 8); await sleep(2500);
+      const ring = await listen(4000);
+      check('KNOB 4 all the way up: release rate 2, everything rings on (the level far steadier, and louder)', env().release === 2 && ring.swing < before.swing - 3 && ring.rms > before.rms,
+        `level swing ${ring.swing.toFixed(1)} dB against ${before.swing.toFixed(1)} dB; rms ${ring.rms.toFixed(0)}`);
+      await turn(K4, -30); await sleep(2500);
       const again = await listen(4000);
-      check('KNOB 3 far past the top (six up): notes ring into each other (the level far steadier than as written)', long.swing < again.swing - 3 && long.rms > short.rms * 3,
-        `level swing ${long.swing.toFixed(1)} dB against ${again.swing.toFixed(1)} dB as written; rms ${long.rms.toFixed(0)}`);
-      check('KNOB 3 back to the middle: the music as written', Math.abs(20 * Math.log10(again.rms / before.rms)) < 4, `rms ${again.rms.toFixed(0)}`);
-      await turn(K1, -22); await sleep(500);                                // a low-pass at 670 Hz
-      const still = await listen(5000);
-      await turn(K4, 7); await sleep(500);                                  // wobble at 2 Hz
-      const wob = await listen(5000);
-      check('with a low-pass on, KNOB 4 up seven: the filter wobbles (the top end comes and goes far more)', wob.topSwing > still.topSwing + 6,
-        `top-end swing ${wob.topSwing.toFixed(1)} dB against ${still.topSwing.toFixed(1)} dB`);
-      check('... and the tempo is not touched by it', Math.abs((await ticksIn(3000)) / pace - 1) < 0.06);
+      check('all four back down: the music as written, its pitch and tempo untouched all the while',
+        Math.abs(20 * Math.log10(again.rms / before.rms)) < 4 && all(await voices(2500), own) && Math.abs((await ticksIn(3000)) / pace - 1) < 0.06, `rms ${again.rms.toFixed(0)}`);
       await tap(ENV);
+      await turn(K1, -22); await sleep(500);                                // ENV again: KNOB 1 is the filter, a low-pass at 670 Hz
+      const still = await filterIn(1500);
+      check('ENV again: KNOB 1 is the filter\'s sweep again, and it stays where it is put', still.lo === -22 && still.hi === -22, `at ${still.lo}`);
+
+      // ---- LFO: KNOB 1 becomes the wobble
+      await tap(LFO);
+      await turn(K1, 7); await sleep(300);                                  // wobble at 2 Hz
+      const wob = await filterIn(2500);
+      check('after LFO, KNOB 1 up seven: the filter swings 8 knob steps each way about where it was left', Math.abs(wob.lo + 30) < 1 && Math.abs(wob.hi + 14) < 1,
+        `between ${wob.lo.toFixed(1)} and ${wob.hi.toFixed(1)}`);
+      await turn(K2, 3); await turn(K3, 3); await turn(K4, 3); await sleep(500);
+      check('... and the other three knobs do nothing there', all(await voices(2000), own) && Math.abs((await ticksIn(3000)) / pace - 1) < 0.06);
+      await tap(LFO);
       await turn(K4, 12); await sleep(500);
       const both = await ticksIn(3000);
-      check('ENV again: KNOB 4 is the tempo again (twice as fast)', Math.abs(both / pace - 2) < 0.12, `${both.toFixed(0)} ticks a second`);
+      check('LFO again: KNOB 4 is the tempo again (twice as fast)', Math.abs(both / pace - 2) < 0.12, `${both.toFixed(0)} ticks a second`);
       await turn(K4, -12); await sleep(500);
-      const wobStill = await listen(5000);
-      check('... and the wobble has gone on all the while', wobStill.topSwing > still.topSwing + 6, `top-end swing ${wobStill.topSwing.toFixed(1)} dB`);
+      const wobStill = await filterIn(2500);
+      check('... and the wobble has gone on all the while', wobStill.hi - wobStill.lo > 14, `between ${wobStill.lo.toFixed(1)} and ${wobStill.hi.toFixed(1)}`);
 
       // ---- EDIT: everything as it was
       await turn(PRESETS, 40); await turn(K3, 5); await turn(ALGORITHM, 3);
+      await tap(ENV); await turn(K2, 2); await turn(K4, 6);                 // and left on the envelope's knobs
       await tap(EDIT); await sleep(3000);
       const back = await voices(5000), after = await listen(4000), paceBack = await ticksIn(3000);
       check('EDIT: instruments, pitch and modulators as written', !back.inst.includes(39) && back.inst.length >= 2 && all(back, own) && depth(back, 0), `GENMIDI ${back.inst.join(', ')}; ${back.up.length} notes seen`);
-      check('... tempo as written, filter and wobble off', Math.abs(paceBack / pace - 1) < 0.06 && Math.abs(20 * Math.log10(after.rms / before.rms)) < 4 && after.topSwing < still.topSwing + 6,
-        `${paceBack.toFixed(0)} ticks a second; rms ${after.rms.toFixed(0)}; top-end swing ${after.topSwing.toFixed(1)} dB`);
-      // SELECT still changes weapon, KNOB 4 no longer does: nothing to see without a second weapon, so only that neither upsets anything
-      await turn(SELECT, 1); await turn(K4, 1); await turn(K4, -1);
+      const off = await filterIn(1000);
+      check('... tempo as written, filter and wobble off', Math.abs(paceBack / pace - 1) < 0.06 && Math.abs(20 * Math.log10(after.rms / before.rms)) < 4 && off.lo === 0 && off.hi === 0,
+        `${paceBack.toFixed(0)} ticks a second; rms ${after.rms.toFixed(0)}; filter at ${off.lo}`);
+      await turn(K4, 12); await sleep(500);
+      const first = await ticksIn(3000);
+      check('... and the knobs have their first jobs again (KNOB 4: tempo)', Math.abs(first / pace - 2) < 0.12, `${first.toFixed(0)} ticks a second`);
+      await turn(K4, -12); await turn(SELECT, 1);
       check('no audio underruns while listening', M._fm1_web_underruns() === under, `${M._fm1_web_underruns() - under}`);
       console.log(bad ? `SOUND KNOBS IN THE GAME: FAILED (${bad})` : 'SOUND KNOBS IN THE GAME: PASSED');
       process.exit(bad ? 1 : 0);

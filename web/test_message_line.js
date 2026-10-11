@@ -7,7 +7,7 @@ globalThis.Module = {
   locateFile: f => path.join(__dirname, 'build', f),
   print: s => { if (/Error|error|panic/.test(s)) console.log('[game]', s); },
   onRuntimeInitialized() {
-    const M = globalThis.Module, B = n => 1 << n, PLAY = B(10), SCL = B(1), ENV = B(2), EDIT = B(4), GLO = B(5);
+    const M = globalThis.Module, B = n => 1 << n, PLAY = B(10), SCL = B(1), ENV = B(2), LFO = B(3), EDIT = B(4), GLO = B(5);
     const ALGORITHM = 1, PRESETS = 2, K1 = 3, K2 = 4, K3 = 5, K4 = 6;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const tap = async b => { M._fm1_web_panel(0, b); await sleep(120); M._fm1_web_panel(0, 0); await sleep(120); };
@@ -46,13 +46,20 @@ globalThis.Module = {
       ok &= await say('depth at rest', () => turn(ALGORITHM, 3));
       ok &= await say('pitch', () => turn(K3, -12));
       ok &= await say('tempo', () => turn(K4, 12));
-      ok &= await say('second pair', () => tap(ENV));
-      ok &= await say('envelope short', () => turn(K3, -6));
-      ok &= await say('envelope long', () => turn(K3, 7));
-      ok &= await say('envelope at rest', () => turn(K3, -1));
-      ok &= await say('wobble, filter off', () => turn(K4, 2));
-      ok &= await say('wobble off', () => turn(K4, -2));
-      ok &= await say('first pair', () => tap(ENV));
+      ok &= await say('envelope knobs', () => tap(ENV));
+      ok &= await say('attack', () => turn(K1, 6));
+      ok &= await say('own attack', () => turn(K1, -6));
+      ok &= await say('decay', () => turn(K2, 8));
+      ok &= await say('own decay', () => turn(K2, -8));
+      ok &= await say('sustain', () => turn(K3, 10));
+      ok &= await say('own sustain', () => turn(K3, -10));
+      ok &= await say('release', () => turn(K4, 8));
+      ok &= await say('own release', () => turn(K4, -8));
+      ok &= await say('first knobs', () => tap(ENV));
+      ok &= await say('wobble knob', () => tap(LFO));
+      ok &= await say('wobble, filter off', () => turn(K1, 2));
+      ok &= await say('wobble off', () => turn(K1, -2));
+      ok &= await say('first knobs again', () => tap(LFO));
       ok &= await say('all back', () => tap(EDIT));
       ok &= await say('frame rate', () => tap(GLO));
       check('every other message fits too', ok, said.join(', '));
