@@ -1975,7 +1975,7 @@ Gurvich).
   the steps are a chain (one callback waits; when it has played its step it sets the next), and with
   `FM1_DRUMS` a full queue drops the callback. Nothing changes in a build without `FM1_DRUMS` (the device's).
   `web/test_drums.js` now starts with a pattern on through the title tune.
-- VERIFIED headless: `node web/test_drums.js` (36 checks: all 13 kits play the pattern; a limiter kit is louder
+- VERIFIED headless: `node web/test_drums.js` (33 checks: all 13 kits play the pattern; a limiter kit is louder
   than twice the music with no flat tops, and with the drums off the music is back at its level);
   `node web/test_fm6.js`; the normal build's `test_sound_knobs.js`; `sh firmware/test.sh`.
 - MEASURED on the takes (bars 5 to 8 of E1M1; RMS of the whole mix, peak; the game's own is 2,204 / 14,260):

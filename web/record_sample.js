@@ -1,8 +1,9 @@
 // Record four bars of E1M1 from the PROTOTYPE browser build (web/build-fm6) with one set of the prototype's
 // settings, always the same four bars of the song (bars 5 to 8), so that takes can be compared.
 //   node web/record_sample.js OUT.wav PATTERN KIT LEVEL DIP PATCH
-// PATTERN 0 off, 1 .. 8 the machine's patterns, 9 the song's own drum part; KIT 0 .. 7; LEVEL 1 .. 5 (3 is the
-// kit's own); DIP 1 .. 5 (4 is the kit's own, 1 none); PATCH 0 the game's own music, 1 .. 8 Felucca's FM patches.
+// PATTERN 0 off, 1 .. 8 the machine's patterns, 9 the song's own drum part; KIT 0 .. 12 (8 .. 12 are on Felucca's
+// limiter); LEVEL 1 .. 5 (3 is the kit's own); DIP 1 .. 5 (4 is the kit's own, 1 none; on a limiter kit it is how
+// hard the music goes in: x0.7, x1, x1.4, x2, x2.8); PATCH 0 the game's own music, 1 .. 8 Felucca's FM patches.
 const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build-fm6');
 const [out, pattern, kit, level, dip, patch] = [process.argv[2], ...process.argv.slice(3).map(Number)];
 const BAR = 4 * 8400 / 110, FROM = 4 * BAR, TO = 8 * BAR;                  // ticks of the music (1/140 s) at 110 beats a minute
