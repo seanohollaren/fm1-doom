@@ -1713,3 +1713,32 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
   (`9d99b4e4d399022c`), `tools/core_diff.py` b11 -> b12: all 69 functions the same instructions.
   `doom_part1.fwsc` SHA-256 `bd5b6b0f…b7ec2e73`, `doom_code.fwsc` `28814e0a…2520a341`; data block 2 unchanged.
   19 package runs pass. Seen in the browser build. Symbols: `firmware/installed_bd5b6b0f/`. Source commit `b6fd5cd`.
+
+## 2026-10-10 — Build "b13": the large message line in the game's own font (built and Mac-tested; NOT installed)
+
+- Sean on b11/b12's line: "extremely readable but honestly it kind of lacks the charm of the game text"; could
+  it be the game's text, larger? Yes. The letters are now the game's message font itself (patches STCFN033 to
+  STCFN095, in the data file already): `fm1_video.c` runs the engine's own `draw_vpatch` on each letter, a
+  font row at a time, into a row of its own (`fm1_osd_px`), and copies that onto two panel rows with every pixel
+  doubled. Straight onto the picture from 4 pixels in and 4 down, as the game's messages sit, no band behind.
+  The colours come through the game's palette, so the letters redden and flash with the rest of the status
+  display. The font drawn for b11 is deleted. (engine patch 0018)
+- A line is 116 of the font's pixels (232 of the panel's 240); `fm1_osd.h` breaks a message into up to three
+  lines by the letters' real widths, 9 font rows apart. For scale: a letter is about 16 x 16 pixels on the panel,
+  against about 6 x 10 for the game's own messages there (which are squeezed 4 to 3 with the picture).
+- VERIFIED in the browser build, `web/test_message_line.js` (new, 8 checks): each of the 128 instrument names
+  fits (20 in one line, 97 in two, 11 in three) and so does every other message the knobs and buttons make; a
+  three-line message changes only columns 4..219, rows 4..53, all in the font's reds, every font pixel a 2 x 2
+  block; three seconds on it is gone and the picture under it is as it was. `firmware/tests/osd_test.c`
+  rewritten for the line breaking (7 checks). Every other browser-build test passes.
+- b13: firmware 270,540 B (304 B smaller than b12: no font of its own), build id `110d1c01`, recovery core id
+  unchanged (`9d99b4e4d399022c`); `tools/core_diff.py` b12 -> b13: all 69 functions the same instructions.
+  `doom_part1.fwsc` SHA-256 `8cd1848c…2663358a`, `doom_code.fwsc` `7ab90cfe…26b79839`; data block 2 unchanged;
+  block 1 has 15,960 B spare. 19 package runs pass; predicted flash passes `check_dump.py`. Symbols:
+  `firmware/installed_8cd1848c/`. Source commit `1e422bb`.
+- MEASURED, worth knowing before the next addition: the 200 KB region for large buffers (`.bigbss`, where
+  `fm1_video.o`, `pd_render.o`, `doom_dev.o` and `fm1_audio.o` keep their statics) is now full to within 12
+  bytes (it ends at `0x01C3BFF4` of `0x01C3C000`). The linker refuses a build that overflows it, so the failure
+  would be at build time, not on the device; the game heap in the other region is untouched (233 KB).
+- NOT VERIFIED until it runs on the FM-1: the size and legibility on the real panel (red on a dark ceiling is
+  how the game does it, but there is no band to help over a bright wall).
