@@ -110,9 +110,7 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
 static volatile uint32_t dev_gain_q12;   /* what the audio interrupt multiplies by; written by the game loop only */
 static int32_t dev_knob16;               /* the knob x16, smoothed */
 #include "fm1_filter.h"                  /* rp2040-doom/src/fm1: the filter KNOB 1 and KNOB 2 play with (fm1_controls.c) */
-#include "fm1_drive.h"                   /* ... and the drive on KNOB 3, ahead of it */
 static fm1_filter_t dev_filter;          /* touched by the audio interrupt only */
-static fm1_drive_t dev_drive;            /* the same */
 static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static int16_t apcm[HALF_WORDS];
 
@@ -146,8 +144,8 @@ void fm1_alnk0_irq(void)                 /* via isr_alnk0 (hal/fm1_isr.S) */
         int32_t *o = &abuf[fm1_audio_free_half() * HALF_WORDS];
         uint32_t i, g = dev_gain_q12;
         fm1_audio_read(apcm, HALF_FRAMES, OUT_RATE);         /* resampled from the game's ring (fm1_audio.c) */
-        fm1_drive_run(&dev_drive, apcm, HALF_FRAMES, fm1_drive_amt);                       /* off: returns at once */
-        fm1_filter_run(&dev_filter, apcm, HALF_FRAMES, fm1_filter_pos, fm1_filter_res);   /* ... and so does this */
+        fm1_filter_run_at(&dev_filter, apcm, HALF_FRAMES,                                  /* off: returns at once */
+                          fm1_filter_swing(&dev_filter, HALF_FRAMES, fm1_filter_pos, fm1_filter_wobble), fm1_filter_res);
         for (i = 0; i < HALF_WORDS; i++)
             o[i] = dv_sample(apcm[i], g);
         fm1_audio_ack_half();

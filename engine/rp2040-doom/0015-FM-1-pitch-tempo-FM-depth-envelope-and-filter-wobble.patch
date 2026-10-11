@@ -1,0 +1,713 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 21:03:00 -0700
+Subject: [PATCH] FM-1: pitch, tempo, FM depth, envelope and filter wobble on
+ the knobs; the drive is gone
+
+The drive did not sound good on a whole mix and is removed. In its place, knobs on the music's own
+FM voices (i_oplmusic.c): KNOB 3 pitch (a semitone a click, an octave each way, sounding notes move
+with it), KNOB 4 tempo (half to double speed), ALGORITHM FM depth (every FM voice's modulator up or
+down 1.5 dB a step). ENV swaps KNOB 3 and KNOB 4 to a second pair and back: the envelope of the
+notes (short: they fall away while held; long: slow attack, long release) and a wobble that swings
+the filter's cutoff about where KNOB 1 left it (fm1_filter.h can now sit between two knob steps).
+KNOB 4 no longer changes weapon (SELECT and OCT-/OCT+ do); the frame rate moves from ENV to GLO;
+EDIT puts all of the sound back.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |  15 ++--
+ src/fm1/fm1_controls.c | 128 +++++++++++++++++++++++---------
+ src/fm1/fm1_drive.h    |  80 --------------------
+ src/fm1/fm1_filter.h   |  78 +++++++++++++++++---
+ src/fm1/fm1_web.c      |  12 ++-
+ src/i_oplmusic.c       | 164 +++++++++++++++++++++++++++++++++++++++--
+ 6 files changed, 334 insertions(+), 143 deletions(-)
+ delete mode 100644 src/fm1/fm1_drive.h
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index 50d7390..e897ead 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -18,16 +18,21 @@ enum { FM1_ENC_SELECT, FM1_ENC_ALGO, FM1_ENC_PRESET, FM1_ENC_K1, FM1_ENC_K2, FM1
+ void fm1_poll_panel(uint32_t *notes, uint32_t *buttons, int8_t enc[FM1_NKNOB]);
+ 
+ // fm1_controls.c: panel -> Doom keys
+-// ... and the settings of the filter and the drive over the game's sound (fm1_filter.h, fm1_drive.h): KNOB 1
+-// sweeps the filter, KNOB 2 sets its resonance, KNOB 3 the drive, EDIT turns them off. Whatever plays the sound
+-// reads them and runs the drive, then the filter.
+-extern volatile int8_t fm1_filter_pos, fm1_filter_res, fm1_drive_amt;
++// ... and the settings of the filter over the game's sound (fm1_filter.h): KNOB 1 sweeps it, KNOB 2 sets its
++// resonance, a third makes it wobble, EDIT turns it off. Whatever plays the sound reads them and runs the filter.
++extern volatile int8_t fm1_filter_pos, fm1_filter_res, fm1_filter_wobble;
+ void fm1_controls_init(void);
+ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_NKNOB]);
+-// the instrument the music is played on (i_oplmusic.c): 0 as written, n = the game's instrument n - 1; its name
++// knobs on the music (i_oplmusic.c, which says what each value means): the instrument it is played on, its
++// pitch, how long its beats last, the depth of its FM and its envelope. After a change of pitch the sounding
++// notes are moved with FM1_Retune; after a change of depth or envelope every voice is rewritten with FM1_Reshape.
+ #define FM1_MUSIC_INSTRS 128
+ extern volatile uint8_t fm1_music_instr;
++extern volatile int8_t fm1_music_pitch, fm1_music_depth, fm1_music_env;
++extern volatile uint32_t fm1_music_time;
+ const char *fm1_music_instr_name(int n);
++void FM1_Retune(void);
++void FM1_Reshape(void);
+ int fm1_next_key(int *doom_key, int *down);    // 1 and *doom_key / *down filled in, or 0 if none
+ // the game data (WHX) and the block the game heap lives in (it must end within 256 KB of the engine's
+ // short-pointed statics: see fm1_web_ram.c)
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 1c019f4..8c1025f 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -8,16 +8,21 @@
+ //                                 F3 strafe left   G3 back   A3 strafe right
+ //   right hand, top of the keyboard:  F5 fire   G5 use (open doors)   F#5 run
+ //   buttons:  HOME menu (Esc)   PLAY select (Enter)   REC fire   OCT- / OCT+ previous / next weapon   FX yes
+-//             SCL next picture shape   ENV show the frame rate
+-//             (the last two answer with a line on the game's message display, so only while a level is up)
+-//   knobs:    SELECT moves through menus (weapons while playing)   KNOB 4 previous / next weapon
+-//   the synth's own tricks, over everything the game plays:
+-//             KNOB 1 sweeps a filter (fm1_filter.h): left of centre a low-pass closing down, right of centre a
+-//             high-pass opening up;   KNOB 2 its resonance
+-//             KNOB 3 drive (fm1_drive.h): distortion ahead of the filter, off at the bottom
+-//             PRESETS the instrument the music is played on (i_oplmusic.c): as written at the bottom, then the
+-//             game's own 128 one after another
+-//             EDIT all three back to as it was
++//             SCL next picture shape   GLO show the frame rate
++//             (those two answer with a line on the game's message display, so only while a level is up)
++//   knobs:    SELECT moves through menus, and changes weapon while playing
++//   the synth's own tricks. On the music itself, which an FM chip plays (i_oplmusic.c):
++//             PRESETS    the instrument: as written at the bottom, then the game's own 128 one after another
++//             ALGORITHM  FM depth: how hard every instrument is modulated, duller to the left, harsher to the right
++//             KNOB 3     pitch, a semitone a click, an octave each way
++//             KNOB 4     tempo, half speed to double
++//   over everything the game plays (fm1_filter.h):
++//             KNOB 1     sweeps a filter: left of centre a low-pass closing down, right a high-pass opening up
++//             KNOB 2     its resonance
++//   ENV gives KNOB 3 and KNOB 4 a second pair of jobs, and back (what the first pair was set to stays):
++//             KNOB 3     the envelope of the music's notes: left, short and dying away; right, slow and ringing on
++//             KNOB 4     wobble: the filter swings to and fro about where KNOB 1 left it, faster to the right
++//   EDIT puts all of the sound back as it was.
+ //
+ #include "doomkeys.h"
+ #include "doomtype.h"
+@@ -26,10 +31,20 @@ extern boolean menuactive;                                   /* doom/m_menu.c */
+ #include "doomstat.h"
+ #include "fm1.h"
+ #include "fm1_filter.h"
+-#include "fm1_drive.h"
+ 
+-volatile int8_t fm1_filter_pos, fm1_filter_res = FM1_FILTER_RES_DEFAULT, fm1_drive_amt;
++volatile int8_t fm1_filter_pos, fm1_filter_res = FM1_FILTER_RES_DEFAULT, fm1_filter_wobble;
+ volatile uint8_t fm1_music_instr;
++volatile int8_t fm1_music_pitch, fm1_music_depth, fm1_music_env;
++volatile uint32_t fm1_music_time = 65536;
++#define FM1_PITCH_STEPS 12                                   /* semitones each way */
++#define FM1_DEPTH_STEPS 8                                    /* 1.5 dB of modulation each */
++#define FM1_ENV_STEPS 6
++#define FM1_TEMPO_STEPS 12                                   /* each way; the speed in percent, a twelfth of a doubling a step */
++static const uint8_t FM1_TEMPO[2 * FM1_TEMPO_STEPS + 1] = {
++    50, 53, 56, 59, 63, 67, 71, 75, 79, 84, 89, 94, 100, 106, 112, 119, 126, 133, 141, 150, 159, 168, 178, 189, 200
++};
++static int8_t fm1_tempo;                                     /* -FM1_TEMPO_STEPS .. FM1_TEMPO_STEPS */
++static uint8_t fm1_page;                                     /* what KNOB 3 and KNOB 4 do: 0 pitch and tempo, 1 envelope and wobble */
+ 
+ static char fm1_msg[40];
+ static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n < 0: no number) on the HUD */
+@@ -61,6 +76,20 @@ static void fm1_say_more(const char *s)                     /* ... and a name af
+     *p = 0;
+ }
+ 
++static int fm1_turn(int now, int steps, int lo, int hi)      /* a knob's setting after some clicks, kept in range */
++{
++    now += steps;
++    return now < lo ? lo : now > hi ? hi : now;
++}
++static void fm1_say_signed(const char *what, int n)          /* "<what> +3", "<what> -2", "<what> AS WRITTEN" */
++{
++    fm1_say(what, -1, n ? n > 0 ? " +" : " -" : " AS WRITTEN");
++    if (n) {
++        char t[3] = {(char)('0' + (n < 0 ? -n : n) / 10), (char)('0' + (n < 0 ? -n : n) % 10), 0};
++        fm1_say_more(t[0] == '0' ? t + 1 : t);
++    }
++}
++
+ #define FM1_KEY_PREVWEAPON '['
+ #define FM1_KEY_NEXTWEAPON ']'
+ 
+@@ -116,7 +145,7 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_view_next();
+         fm1_say(fm1_view_name(), -1, "");
+     }
+-    if (pressed & (1u << FM1_BTN_ENV))
++    if (pressed & (1u << FM1_BTN_GLO))
+         fm1_say("", (int)fps, " FRAMES A SECOND");
+     for (unsigned i = 0; i < FM1_NMAP; i++) {
+         unsigned s = FM1_MAP[i].src;
+@@ -150,22 +179,9 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_filter_res = (int8_t)res;
+         fm1_say("RESONANCE ", res, "");
+     }
+-    // drive: KNOB 3, off at the bottom
+-    if (enc[FM1_ENC_K3]) {
+-        int amt = fm1_drive_amt + enc[FM1_ENC_K3];
+-        if (amt < 0) amt = 0;
+-        if (amt > FM1_DRIVE_STEPS) amt = FM1_DRIVE_STEPS;
+-        fm1_drive_amt = (int8_t)amt;
+-        if (amt)
+-            fm1_say("DRIVE ", amt, "");
+-        else
+-            fm1_say("DRIVE OFF", -1, "");
+-    }
+     // the music's instrument: PRESETS, as written at the bottom (notes already sounding keep theirs)
+     if (enc[FM1_ENC_PRESET]) {
+-        int n = fm1_music_instr + enc[FM1_ENC_PRESET];
+-        if (n < 0) n = 0;
+-        if (n > FM1_MUSIC_INSTRS) n = FM1_MUSIC_INSTRS;
++        int n = fm1_turn(fm1_music_instr, enc[FM1_ENC_PRESET], 0, FM1_MUSIC_INSTRS);
+         fm1_music_instr = (uint8_t)n;
+         if (n) {
+             fm1_say("MUSIC ", n, " ");
+@@ -173,20 +189,62 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         } else
+             fm1_say("MUSIC AS WRITTEN", -1, "");
+     }
+-    // EDIT: all of it off
++    // FM depth: ALGORITHM
++    if (enc[FM1_ENC_ALGO]) {
++        fm1_music_depth = (int8_t)fm1_turn(fm1_music_depth, enc[FM1_ENC_ALGO], -FM1_DEPTH_STEPS, FM1_DEPTH_STEPS);
++        FM1_Reshape();
++        fm1_say_signed("FM DEPTH", fm1_music_depth);
++    }
++    // KNOB 3 and KNOB 4: pitch and tempo, or (after ENV) envelope and wobble
++    if (pressed & (1u << FM1_BTN_ENV)) {
++        fm1_page ^= 1u;
++        fm1_say("KNOBS 3 AND 4: ", -1, fm1_page ? "ENVELOPE, WOBBLE" : "PITCH, TEMPO");
++    }
++    if (enc[FM1_ENC_K3] && !fm1_page) {
++        fm1_music_pitch = (int8_t)fm1_turn(fm1_music_pitch, enc[FM1_ENC_K3], -FM1_PITCH_STEPS, FM1_PITCH_STEPS);
++        FM1_Retune();
++        fm1_say_signed("PITCH", fm1_music_pitch);
++    }
++    if (enc[FM1_ENC_K4] && !fm1_page) {
++        fm1_tempo = (int8_t)fm1_turn(fm1_tempo, enc[FM1_ENC_K4], -FM1_TEMPO_STEPS, FM1_TEMPO_STEPS);
++        fm1_music_time = 6553600u / FM1_TEMPO[fm1_tempo + FM1_TEMPO_STEPS];
++        fm1_say("TEMPO ", FM1_TEMPO[fm1_tempo + FM1_TEMPO_STEPS], "%");
++    }
++    if (enc[FM1_ENC_K3] && fm1_page) {
++        int e = fm1_turn(fm1_music_env, enc[FM1_ENC_K3], -FM1_ENV_STEPS, FM1_ENV_STEPS);
++        fm1_music_env = (int8_t)e;
++        FM1_Reshape();
++        if (e)
++            fm1_say(e < 0 ? "ENVELOPE SHORT " : "ENVELOPE LONG ", e < 0 ? -e : e, "");
++        else
++            fm1_say("ENVELOPE AS WRITTEN", -1, "");
++    }
++    if (enc[FM1_ENC_K4] && fm1_page) {
++        int w = fm1_turn(fm1_filter_wobble, enc[FM1_ENC_K4], 0, FM1_WOBBLE_STEPS);
++        fm1_filter_wobble = (int8_t)w;
++        if (w) {
++            fm1_say("WOBBLE ", -1, FM1_WOBBLE_HZ[w - 1]);
++            fm1_say_more(fm1_filter_pos ? " HZ" : " HZ: TURN KNOB 1 TOO");     /* nothing to wobble while the filter is off */
++        } else
++            fm1_say("WOBBLE OFF", -1, "");
++    }
++    // EDIT: all of it as it was
+     if (pressed & (1u << FM1_BTN_EDIT)) {
+         fm1_filter_pos = 0;
+-        fm1_drive_amt = 0;
++        fm1_filter_wobble = 0;
+         fm1_music_instr = 0;
++        fm1_music_pitch = fm1_music_depth = fm1_music_env = 0;
++        fm1_tempo = 0;
++        fm1_music_time = 65536;
++        FM1_Retune();
++        FM1_Reshape();
+         fm1_say("SOUND AS IT WAS", -1, "");
+     }
+-    int sel = enc[FM1_ENC_SELECT], k4 = enc[FM1_ENC_K4];
+-    if (menuactive) {
++    int sel = enc[FM1_ENC_SELECT];
++    if (menuactive)
+         fm1_tap(sel > 0 ? KEY_DOWNARROW : KEY_UPARROW, sel > 0 ? sel : -sel);
+-    } else {
+-        k4 += sel;
+-    }
+-    fm1_tap(k4 > 0 ? FM1_KEY_NEXTWEAPON : FM1_KEY_PREVWEAPON, k4 > 0 ? k4 : -k4);
++    else
++        fm1_tap(sel > 0 ? FM1_KEY_NEXTWEAPON : FM1_KEY_PREVWEAPON, sel > 0 ? sel : -sel);
+ }
+ 
+ int fm1_next_key(int *doom_key, int *down)
+diff --git a/src/fm1/fm1_drive.h b/src/fm1/fm1_drive.h
+deleted file mode 100644
+index 7815528..0000000
+--- a/src/fm1/fm1_drive.h
++++ /dev/null
+@@ -1,80 +0,0 @@
+-// FM-1: drive, a distortion over everything the game plays, ahead of the filter (fm1_filter.h).
+-//
+-// One knob: off (the sound is not touched at all), then 16 steps. Each step turns the sound up further into a
+-// soft clipper (y = 1.5x - 0.5x^3, flat beyond full scale), from 4 times, where the music's peaks begin to
+-// round off, to 64 times, where nearly half of it is flat-topped: fuzz. The result is turned back down so that
+-// the game's own sound gets only a little louder as the knob rises: the levels below were set on five seconds of
+-// E1M1's music from the browser build, to come out 1 dB louder (RMS) at the first step and 4 dB at the last.
+-// fm1_controls.c owns the setting (fm1_drive_amt); whatever plays the sound calls fm1_drive_run on each block
+-// of 16-bit stereo. A change of step is ramped across one block and off <-> on is a crossfade, so nothing clicks.
+-// firmware/tests/drive_test.c in the fm1-doom repository tests it on a PC.
+-//
+-// SPDX-License-Identifier: GPL-2.0-or-later
+-#pragma once
+-#include <stdint.h>
+-
+-#define FM1_DRIVE_STEPS 16              // knob positions above off
+-
+-// the gain into the clipper in Q8, 4 to 64 times in equal ratios, and the level out of it in Q15
+-static const uint16_t FM1_DRIVE_GAIN[FM1_DRIVE_STEPS] = {
+-    1024,  1232,  1482,  1783,  2145,  2580,  3104,  3734,  4493,  5405,  6502,  7822,  9410, 11321, 13619, 16384
+-};
+-static const uint16_t FM1_DRIVE_LEVEL[FM1_DRIVE_STEPS] = {
+-    6487,  5654,  4977,  4441,  4022,  3706,  3498,  3401,  3362,  3353,  3362,  3384,  3416,  3455,  3500,  3549
+-};
+-
+-typedef struct {
+-    int32_t g, l;                       // gain and level in use, each with 8 extra bits (so a ramp has something to step by)
+-    int32_t wet;                        // 0 = the sound as it came .. 256 << 16 = all drive
+-    int8_t amt;                         // the step g and l were last heading for
+-} fm1_drive_t;
+-
+-// one sample through the clipper: gain in Q8, level in Q15
+-static inline int32_t fm1_drive_shape(int32_t s, int32_t gain, int32_t level)
+-{
+-    int32_t x = (s * gain) >> 8;
+-    if (x > 32767) x = 32767;
+-    if (x < -32767) x = -32767;
+-    x = (x * (49152 - (((x * x) >> 15) >> 1))) >> 15;       // 1.5x - 0.5x^3 with full scale as 1
+-    return (x * level) >> 15;
+-}
+-
+-// One block of interleaved stereo, in place. amt: 0 (off) .. FM1_DRIVE_STEPS.
+-// Off (once any fade has finished) returns without touching a sample.
+-static void fm1_drive_run(fm1_drive_t *d, int16_t *buf, uint32_t frames, int amt)
+-{
+-    int32_t tg, tl, tw, dg, dl, dw, g, l, w;
+-    uint32_t i;
+-    if (!frames)
+-        return;
+-    if (amt < 0) amt = 0;
+-    if (amt > FM1_DRIVE_STEPS) amt = FM1_DRIVE_STEPS;
+-    if (!amt && !d->wet)
+-        return;
+-    if (amt) {
+-        tg = (int32_t)FM1_DRIVE_GAIN[amt - 1] << 8;
+-        tl = (int32_t)FM1_DRIVE_LEVEL[amt - 1] << 8;
+-        tw = 256 << 16;
+-        if (!d->wet) {                  // coming on from off: start at the new step
+-            d->g = tg;
+-            d->l = tl;
+-        }
+-    } else {                            // going off: fade out with the drive as it is
+-        tg = d->g;
+-        tl = d->l;
+-        tw = 0;
+-    }
+-    d->amt = (int8_t)amt;
+-    g = d->g; l = d->l; w = d->wet;
+-    dg = (tg - g) / (int32_t)frames;
+-    dl = (tl - l) / (int32_t)frames;
+-    dw = (tw - w) / (int32_t)frames;
+-    for (i = 0; i < frames; i++, buf += 2) {
+-        int32_t a = buf[0], b = buf[1], m;
+-        g += dg; l += dl; w += dw;
+-        m = w >> 16;
+-        buf[0] = (int16_t)(a + (((fm1_drive_shape(a, g >> 8, l >> 8) - a) * m) >> 8));
+-        buf[1] = (int16_t)(b + (((fm1_drive_shape(b, g >> 8, l >> 8) - b) * m) >> 8));
+-    }
+-    d->g = tg; d->l = tl; d->wet = tw;
+-}
+diff --git a/src/fm1/fm1_filter.h b/src/fm1/fm1_filter.h
+index 1c8eb47..75ee5da 100644
+--- a/src/fm1/fm1_filter.h
++++ b/src/fm1/fm1_filter.h
+@@ -10,6 +10,10 @@
+ // stable at every cutoff and resonance, and well behaved while the cutoff moves. Arithmetic is fixed point with
+ // 64-bit products (one instruction on the FM-1's CPU): coefficients in Q24, samples carried with 8 extra bits.
+ // Changes of setting are ramped across one block, and off <-> on is a crossfade, so nothing clicks.
++//
++// A third setting, the wobble (fm1_filter_wobble), swings the cutoff to and fro about where the sweep knob left
++// it: a triangle in knob steps, 8 steps each way (about an octave and a third), at one of 11 speeds from a
++// quarter of a hertz to 8 Hz. For that the filter can sit between two knob steps (fm1_filter_run_at).
+ // firmware/tests/filter_test.c in the fm1-doom repository tests it on a PC.
+ //
+ // SPDX-License-Identifier: GPL-2.0-or-later
+@@ -44,11 +48,34 @@ typedef struct {
+     int32_t c[5];                       // coefficients in use: a1, a2, a3, k, output level (Q24)
+     int32_t t[5];                       // ... and where they are heading
+     int32_t wet, twet;                  // 0 = the sound as it came, 256 = all filter
+-    int8_t pos, res, high, set;         // the settings c[] was made for; high: 1 = high-pass, 0 = low-pass
++    int16_t at;                         // the settings t[] was made for: the position in 256ths of a knob step,
++    int8_t res, high, set;              // the resonance; high: 1 = high-pass, 0 = low-pass
++    uint32_t lfo;                       // the wobble's phase, a full turn in 2^32
+ } fm1_filter_t;
+ 
+ // which cutoff a knob position means (index into the tables)
+ static inline int fm1_filter_step(int pos) { return pos < 0 ? FM1_FILTER_STEPS + pos : pos - 1; }
++// ... and the cutoff's tan() for a position in 256ths of a step, on a straight line between the table's entries
++// (they are 12 % apart, so the line is within half a percent of the curve)
++static inline int32_t fm1_filter_g(int at)
++{
++    int i = at < 0 ? FM1_FILTER_STEPS * 256 + at : at - 256, n;
++    if (i < 0) i = 0;
++    n = i >> 8;
++    if (n >= FM1_FILTER_STEPS - 1)
++        return FM1_FILTER_G[FM1_FILTER_STEPS - 1];
++    return FM1_FILTER_G[n] + (int32_t)(((int64_t)(FM1_FILTER_G[n + 1] - FM1_FILTER_G[n]) * (i & 255)) >> 8);
++}
++
++// the wobble: its speeds as phase a frame at 44118 Hz (hz * 2^32 / 44118), and how far it swings
++#define FM1_WOBBLE_STEPS 11
++#define FM1_WOBBLE_DEPTH 8              // knob steps each way
++static const uint32_t FM1_WOBBLE_INC[FM1_WOBBLE_STEPS] = {
++    24338, 34419, 48676, 68838, 97352, 137676, 194704, 275353, 389407, 550705, 778815
++};
++static const char *const FM1_WOBBLE_HZ[FM1_WOBBLE_STEPS] __attribute__((unused)) = {
++    "0.25", "0.35", "0.5", "0.7", "1", "1.4", "2", "2.8", "4", "5.6", "8"
++};
+ 
+ static inline int32_t fm1_filter_mul(int32_t c, int32_t v) { return (int32_t)(((int64_t)c * v) >> 24); }
+ // A guard on the integrators, not a limiter: full scale is 2^23 here, so 2^28 is 30 dB above the loudest input.
+@@ -82,22 +109,45 @@ static inline void fm1_filter_pass(fm1_filter_t *f, int16_t *p, uint32_t frames,
+     f->ic2[ch] = ic2;
+ }
+ 
+-// One block of interleaved stereo, in place. pos: -FM1_FILTER_STEPS .. FM1_FILTER_STEPS; res: 0 .. FM1_FILTER_RES - 1.
+-// Off (pos 0, once any fade has finished) returns without touching a sample.
+-static void fm1_filter_run(fm1_filter_t *f, int16_t *buf, uint32_t frames, int pos, int res)
++// Where the filter is for the block about to be played, in 256ths of a knob step: the sweep knob's position,
++// swung by the wobble (0: none; 1 .. FM1_WOBBLE_STEPS: its speed). It never swings across the centre or past
++// the ends, and an idle wobble waits in the middle of its swing. Call it once a block, wobbling or not.
++static inline int fm1_filter_swing(fm1_filter_t *f, uint32_t frames, int pos, int wobble)
++{
++    int32_t tri, at;
++    if (pos < -FM1_FILTER_STEPS) pos = -FM1_FILTER_STEPS;
++    if (pos > FM1_FILTER_STEPS) pos = FM1_FILTER_STEPS;
++    if (!pos || wobble <= 0) {
++        f->lfo = 0x40000000u;
++        return pos * 256;
++    }
++    if (wobble > FM1_WOBBLE_STEPS) wobble = FM1_WOBBLE_STEPS;
++    f->lfo += FM1_WOBBLE_INC[wobble - 1] * frames;
++    tri = (int32_t)(f->lfo >> 16);                          // 0 .. 65535 a turn
++    if (tri > 32767) tri = 65535 - tri;                     // up, then down again
++    at = pos * 256 + (((tri - 16384) * FM1_WOBBLE_DEPTH) >> 6);
++    if (pos < 0)
++        return at < -FM1_FILTER_STEPS * 256 ? -FM1_FILTER_STEPS * 256 : at > -256 ? -256 : at;
++    return at > FM1_FILTER_STEPS * 256 ? FM1_FILTER_STEPS * 256 : at < 256 ? 256 : at;
++}
++
++// One block of interleaved stereo, in place. at: the position in 256ths of a knob step, -FM1_FILTER_STEPS * 256 ..
++// FM1_FILTER_STEPS * 256 (0: off); res: 0 .. FM1_FILTER_RES - 1.
++// Off (once any fade has finished) returns without touching a sample.
++static void fm1_filter_run_at(fm1_filter_t *f, int16_t *buf, uint32_t frames, int at, int res)
+ {
+     uint32_t i;
+     int32_t d[5], dw;
+     if (!frames)
+         return;
+-    if (pos < -FM1_FILTER_STEPS) pos = -FM1_FILTER_STEPS;
+-    if (pos > FM1_FILTER_STEPS) pos = FM1_FILTER_STEPS;
++    if (at < -FM1_FILTER_STEPS * 256) at = -FM1_FILTER_STEPS * 256;
++    if (at > FM1_FILTER_STEPS * 256) at = FM1_FILTER_STEPS * 256;
+     if (res < 0) res = 0;
+     if (res >= FM1_FILTER_RES) res = FM1_FILTER_RES - 1;
+-    if (!f->set || pos != f->pos || res != f->res) {
+-        if (pos) {
++    if (!f->set || at != f->at || res != f->res) {
++        if (at) {
+             const int64_t one = (int64_t)1 << 24;
+-            int32_t g = FM1_FILTER_G[fm1_filter_step(pos)], k = FM1_FILTER_K[res];
++            int32_t g = fm1_filter_g(at), k = FM1_FILTER_K[res];
+             int32_t a1 = (int32_t)((one << 24) / (one + (((int64_t)g * (g + k)) >> 24)));
+             int32_t level = (1 << 23) + k / 2;      // quieter as the resonance rises, so its peak has somewhere to go
+             f->t[0] = a1;
+@@ -109,11 +159,11 @@ static void fm1_filter_run(fm1_filter_t *f, int16_t *buf, uint32_t frames, int p
+                 for (i = 0; i < 5; i++) f->c[i] = f->t[i];
+                 f->ic1[0] = f->ic1[1] = f->ic2[0] = f->ic2[1] = 0;
+             }
+-            f->high = pos > 0;
++            f->high = at > 0;
+             f->twet = 256;
+         } else
+             f->twet = 0;                            // going off: fade out with the filter as it is
+-        f->pos = (int8_t)pos;
++        f->at = (int16_t)at;
+         f->res = (int8_t)res;
+         f->set = 1;
+     }
+@@ -128,3 +178,9 @@ static void fm1_filter_run(fm1_filter_t *f, int16_t *buf, uint32_t frames, int p
+         f->c[i] = f->t[i];
+     f->wet = f->twet;
+ }
++
++// ... the same with the filter on a knob step. pos: -FM1_FILTER_STEPS .. FM1_FILTER_STEPS (0: off).
++static inline void fm1_filter_run(fm1_filter_t *f, int16_t *buf, uint32_t frames, int pos, int res)
++{
++    fm1_filter_run_at(f, buf, frames, pos * 256, res);
++}
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 1d8d12b..3af2e17 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -8,7 +8,6 @@
+ #include <string.h>
+ #include "fm1.h"
+ #include "fm1_filter.h"
+-#include "fm1_drive.h"
+ #include "../tiny.whd.h"
+ 
+ static uint16_t fm1_lcd[240 * 240];
+@@ -71,20 +70,19 @@ EMSCRIPTEN_KEEPALIVE uint32_t fm1_web_frames(void) { return fm1_frames; }
+ // the page's audio callback: frames of 16-bit stereo at the AudioContext's rate
+ static int16_t fm1_web_pcm[4096 * 2];
+ static fm1_filter_t fm1_web_filter;
+-static fm1_drive_t fm1_web_drive;
+ EMSCRIPTEN_KEEPALIVE int16_t *fm1_web_audio(int frames, int rate)
+ {
+     if (frames > 4096)
+         frames = 4096;
+     fm1_audio_read(fm1_web_pcm, (uint32_t)frames, (uint32_t)rate);
+-    fm1_drive_run(&fm1_web_drive, fm1_web_pcm, (uint32_t)frames, fm1_drive_amt);
+-    fm1_filter_run(&fm1_web_filter, fm1_web_pcm, (uint32_t)frames, fm1_filter_pos, fm1_filter_res);   // tuned for 44.1 kHz
++    fm1_filter_run_at(&fm1_web_filter, fm1_web_pcm, (uint32_t)frames,                                 // tuned for 44.1 kHz
++                      fm1_filter_swing(&fm1_web_filter, (uint32_t)frames, fm1_filter_pos, fm1_filter_wobble), fm1_filter_res);
+     return fm1_web_pcm;
+ }
+ 
+-// test hook: the instrument of the i-th sounding voice of the music, 0..127 melodic, 128 up percussion; -1 for none
+-int fm1_music_voice_instr(int i);
+-EMSCRIPTEN_KEEPALIVE int fm1_web_voice_instr(int i) { return fm1_music_voice_instr(i); }
++// test hook: the music's voices and how far it has played (i_oplmusic.c fm1_music_probe says what the numbers are)
++int fm1_music_probe(int what, int i);
++EMSCRIPTEN_KEEPALIVE int fm1_web_music(int what, int i) { return fm1_music_probe(what, i); }
+ 
+ // test hook: finish the level as the exit switch would (the page's console: Module._fm1_web_exit_level())
+ void G_ExitLevel(void);
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index 2287648..5ce5ebf 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -344,9 +344,17 @@ static genmidi_instr_t *percussion_instrs;
+ static char (*main_instr_names)[32];
+ static char (*percussion_names)[32];
+ #if FM1
+-// FM-1: the PRESETS knob plays every melodic channel on one of the game's own instruments (fm1/fm1_controls.c).
+-// 0: as the music is written; n: instrument n - 1 of GENMIDI's 128. Percussion is left alone.
++// FM-1: knobs on the music. fm1/fm1_controls.c owns the settings; percussion is left alone by all of them.
++//   fm1_music_instr  0: as the music is written; n: every melodic note plays on instrument n - 1 of GENMIDI's 128
++//   fm1_music_pitch  semitones added to every melodic note (FM1_Retune moves the notes sounding now)
++//   fm1_music_time   how long a beat lasts, 65536 = as written
++//   fm1_music_depth  FM depth: each step turns the modulator of an FM voice up (+) or down (-) by 1.5 dB
++//   fm1_music_env    the envelope of what is heard: each step up, a slower attack and a release twice as long;
++//                    each step down, notes that die away by themselves, twice as fast (FM1_Reshape applies
++//                    this and the depth to every voice at once)
+ extern volatile uint8_t fm1_music_instr;
++extern volatile int8_t fm1_music_pitch, fm1_music_depth, fm1_music_env;
++extern volatile uint32_t fm1_music_time;
+ const char *fm1_music_instr_name(int n)
+ {
+     return main_instr_names && n >= 0 && n < GENMIDI_NUM_INSTRS ? main_instr_names[n] : "";
+@@ -361,10 +369,28 @@ static opl_voice_t *voice_alloced_list[OPL_NUM_VOICES * 2];
+ static int voice_free_num;
+ static int voice_alloced_num;
+ #if FM1_WEB
+-// (browser build, test hook) the instrument of the i-th sounding voice: 0..127 melodic, 128 up percussion
+-int fm1_music_voice_instr(int i)
++// (browser build, test hook) what the i-th sounding voice is doing, -1 when there is none.
++// what 0: its instrument, 0..127 melodic, 128 up percussion; 1: its frequency register (octave << 10 | number);
++// 2: its modulator's level, 0 loudest .. 63; 4: its note as written, before the pitch knob.
++// what 3: how many of the music's ticks have been played so far.
++static unsigned int fm1_music_ticks;
++int fm1_music_probe(int what, int i)
+ {
+-    return i >= 0 && i < voice_alloced_num ? (int) (voice_alloced_list[i]->current_instr - main_instrs) : -1;
++    opl_voice_t *voice;
++
++    if (what == 3)
++    {
++        return (int) fm1_music_ticks;
++    }
++    if (i < 0 || i >= voice_alloced_num)
++    {
++        return -1;
++    }
++    voice = voice_alloced_list[i];
++    return what == 0 ? (int) (voice->current_instr - main_instrs)
++         : what == 1 ? (int) voice->freq
++         : what == 4 ? (int) voice->note
++         : (int) (voice->mod_volume & 0x3f);
+ }
+ #endif
+ #if !DOOM_TINY
+@@ -536,6 +562,84 @@ static void LoadOperatorData(int operator, genmidi_op_t *data,
+     OPL_WriteRegister(OPL_REGS_WAVEFORM + operator, data->waveform);
+ }
+ 
++#if FM1
++// FM-1: the depth and envelope knobs, written over what LoadOperatorData put in a voice's registers
++// (with both knobs at rest this writes the instrument's own values back).
++
++#define FM1_ENV_ATTACK  7       // "long" step 1 caps the attack rate at 6, step 6 at 1
++#define FM1_ENV_RELEASE 9       // ... and the release rate at 8 (a third of a second) down to 3 (ten seconds)
++
++static void FM1_ShapeVoice(opl_voice_t *voice)
++{
++    genmidi_voice_t *data;
++    genmidi_op_t *op;
++    int fm, env, i, n, reg, attack, decay, level, release;
++
++    data = &voice->current_instr->voices[voice->current_instr_voice];
++    fm = (data->feedback & 0x01) == 0;
++    env = fm1_music_env;
++
++    // The modulator's level sets how far it bends the carrier's wave:
++    // 0 is the most, 63 none, three quarters of a decibel a step.
++
++    if (fm)
++    {
++        n = (data->modulator.level & 0x3f) - 2 * fm1_music_depth;
++        n = n < 0 ? 0 : n > 0x3f ? 0x3f : n;
++        voice->mod_volume = data->modulator.scale | n;
++        OPL_WriteRegister((OPL_REGS_LEVEL + voice->op1) | voice->array,
++                          voice->mod_volume);
++    }
++
++    // The envelope of the operators that are heard directly: the carrier,
++    // and the other one too when the two are simply added together.
++
++    for (i = fm ? 1 : 0; i < 2; i++)
++    {
++        op = i ? &data->carrier : &data->modulator;
++        reg = (i ? voice->op2 : voice->op1) | voice->array;
++        attack = op->attack >> 4;
++        decay = op->attack & 0x0f;
++        level = op->sustain >> 4;
++        release = op->sustain & 0x0f;
++
++        // Every rate is twice as fast as the one below it.
++
++        if (env > 0)
++        {
++            // long: the attack no faster than FM1_ENV_ATTACK - env, and the
++            // release no faster than FM1_ENV_RELEASE - env
++            if (attack > FM1_ENV_ATTACK - env)
++            {
++                attack = FM1_ENV_ATTACK - env;
++            }
++            if (release > FM1_ENV_RELEASE - env)
++            {
++                release = FM1_ENV_RELEASE - env;
++            }
++        }
++        else if (env < 0)
++        {
++            // short: the note falls away to nothing while the key is still
++            // down, at rate 7 (about half a second) at the first step up to
++            // 12 (a few hundredths) at the last, and is let go no slower
++            level = 0x0f;
++            if (decay < 6 - env)
++            {
++                decay = 6 - env;
++            }
++            if (release < 6 - env)
++            {
++                release = 6 - env;
++            }
++        }
++
++        OPL_WriteRegister(OPL_REGS_ATTACK + reg, (attack << 4) | decay);
++        OPL_WriteRegister(OPL_REGS_SUSTAIN + reg, (level << 4) | release);
++    }
++}
++#endif
++
+ // Set the instrument for a particular voice.
+ 
+ static void SetVoiceInstrument(opl_voice_t *voice,
+@@ -579,6 +683,13 @@ static void SetVoiceInstrument(opl_voice_t *voice,
+     OPL_WriteRegister((OPL_REGS_FEEDBACK + voice->index) | voice->array,
+                       data->feedback | voice->reg_pan);
+ 
++#if FM1
++    if (fm1_music_depth || fm1_music_env)
++    {
++        FM1_ShapeVoice(voice);
++    }
++#endif
++
+     // Calculate voice priority.
+ 
+     voice->priority = 0x0f - (data->carrier.attack >> 4)
+@@ -876,6 +987,12 @@ static unsigned int FrequencyForVoice(opl_voice_t *voice)
+     if ((SHORT(voice->current_instr->flags) & GENMIDI_FLAG_FIXED) == 0)
+     {
+         note += (signed short) SHORT(gm_voice->base_note_offset);
++#if FM1
++        if (voice->current_instr < percussion_instrs)
++        {
++            note += fm1_music_pitch;
++        }
++#endif
+     }
+ 
+     // Avoid possible overflow due to base note offset:
+@@ -956,6 +1073,37 @@ static void UpdateVoiceFrequency(opl_voice_t *voice)
+     }
+ }
+ 
++#if FM1
++// FM-1: the pitch knob was turned: the notes sounding now move with it.
++
++void FM1_Retune(void)
++{
++    int i;
++
++    for (i = 0; i < voice_alloced_num; i++)
++    {
++        UpdateVoiceFrequency(voice_alloced_list[i]);
++    }
++}
++
++// FM-1: the depth or the envelope knob was turned: every voice that holds
++// an instrument takes it, sounding or not (a voice keeps its registers
++// until it is given another instrument).
++
++void FM1_Reshape(void)
++{
++    int i;
++
++    for (i = 0; i < num_opl_voices; i++)
++    {
++        if (voices[i].current_instr != NULL)
++        {
++            FM1_ShapeVoice(&voices[i]);
++        }
++    }
++}
++#endif
++
+ // Program a single voice for an instrument.  For a double voice
+ // instrument (GENMIDI_FLAG_2VOICE), this is called twice for each
+ // key on event.
+@@ -1510,6 +1658,12 @@ static void ScheduleTrack(opl_track_data_t *track)
+     nticks = MIDI_GetDeltaTime(track->iter);
+ //    printf("DELTA TICK %d\n", nticks);
+     us = ((uint64_t) nticks * us_per_beat) / ticks_per_beat;
++#if FM1
++    us = (us * fm1_music_time) >> 16;       // the tempo knob
++#endif
++#if FM1_WEB
++    fm1_music_ticks += nticks;
++#endif
+ 
+     // Set a timer to be invoked when the next event is
+     // ready to play.

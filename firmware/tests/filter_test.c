@@ -164,6 +164,83 @@ int main(void)
     }
     check("the two channels are separate: a silent right stays silent while the left plays", ok);
     check("no block at all is no work and no crash", (fm1_filter_run(&f, a, 0, 5, 2), 1));
+
+    /* ---- between two knob steps, and the wobble that needs it */
+    ok = 1;
+    for (pos = -FM1_FILTER_STEPS; pos <= FM1_FILTER_STEPS; pos++)
+        if (pos && fm1_filter_g(pos * 256) != FM1_FILTER_G[fm1_filter_step(pos)])
+            ok = 0;
+    for (i = -FM1_FILTER_STEPS * 256 + 1; i < -256; i++)         /* low-pass side: opening as the position rises */
+        if (fm1_filter_g(i) < fm1_filter_g(i - 1))
+            ok = 0;
+    for (i = 257; i <= FM1_FILTER_STEPS * 256; i++)              /* high-pass side the same */
+        if (fm1_filter_g(i) < fm1_filter_g(i - 1))
+            ok = 0;
+    d = 0;
+    for (i = 0; i < 256 * (FM1_FILTER_STEPS - 1); i++) {         /* against the curve the table is cut from */
+        double hz = 80.0 * pow(100.0, i / 256.0 / (FM1_FILTER_STEPS - 1)), e = fm1_filter_g(i + 256) / (tan(M_PI * hz / FS) * 16777216.0) - 1;
+        if (fabs(e) > d) d = fabs(e);
+    }
+    printf("        (a position between two steps is within %.2f %% of the true cutoff)\n", d * 100);
+    check("on a knob step the cutoff is the table's; between steps it lies between, within half a percent of the curve", ok && d < 0.005);
+
+    memset(&f, 0, sizeof f);
+    ok = fm1_filter_swing(&f, BLOCK, -20, 0) == -20 * 256 && fm1_filter_swing(&f, BLOCK, 0, 5) == 0 && fm1_filter_swing(&f, BLOCK, 7, -3) == 7 * 256;
+    check("no wobble, or no filter to wobble: the position is the knob's", ok);
+    for (ok = 1, n = 1; n <= FM1_WOBBLE_STEPS; n++) {
+        int lo = 1 << 30, hi = -(1 << 30), last, turns = 0, rising = 0, first = -1, lastpeak = 0, at;
+        double hz = 0.25 * pow(2.0, (n - 1) / 2.0), got;
+        memset(&f, 0, sizeof f);
+        fm1_filter_swing(&f, BLOCK, -20, 0);                     /* idle: it waits in the middle */
+        last = fm1_filter_swing(&f, BLOCK, -20, n);
+        if (abs(last + 20 * 256) >= 256) ok = 0;                 /* ... and sets off from there: less than a knob step in a block */
+        for (i = 1; i < (int)(FS / BLOCK * 20); i++) {           /* 20 seconds */
+            at = fm1_filter_swing(&f, BLOCK, -20, n);
+            if (at < lo) lo = at;
+            if (at > hi) hi = at;
+            if (rising && at < last) {                           /* a peak */
+                if (first < 0) first = i; else turns++;
+                lastpeak = i;
+            }
+            rising = at > last ? 1 : at < last ? 0 : rising;
+            last = at;
+        }
+        got = turns * FS / BLOCK / (lastpeak - first);
+        if (fabs(got / hz - 1) > 0.02 || abs(lo - (-20 - FM1_WOBBLE_DEPTH) * 256) > 40 || abs(hi - (-20 + FM1_WOBBLE_DEPTH) * 256) > 40)
+            ok = 0, printf("        speed %d: %.3f Hz (wanted %.3f), swing %d .. %d\n", n, got, hz, lo, hi);
+    }
+    check("the wobble swings 8 knob steps each way about the knob's position, at 0.25 Hz to 8 Hz as its table says", ok);
+    for (ok = 1, pos = -FM1_FILTER_STEPS; pos <= FM1_FILTER_STEPS; pos++) {
+        memset(&f, 0, sizeof f);
+        for (i = 0; pos && i < 3000; i++) {
+            int at = fm1_filter_swing(&f, BLOCK, pos, FM1_WOBBLE_STEPS);
+            if (pos < 0 ? at > -256 || at < -FM1_FILTER_STEPS * 256 : at < 256 || at > FM1_FILTER_STEPS * 256)
+                ok = 0;
+        }
+    }
+    check("... and never across the centre or past either end, wherever the knob is", ok);
+    {   /* a tone an octave above a low-pass's cutoff: the wobble makes it come and go, without a click */
+        double lo = 1e9, hi = 0, ph = 0, w = 2 * M_PI * 1700 / FS, biggest = 0, prev = 0;
+        memset(&f, 0, sizeof f);
+        for (n = 0; n < (int)(FS / BLOCK * 6); n++) {
+            double sq = 0;
+            for (i = 0; i < BLOCK; i++, ph += w)
+                a[2 * i] = a[2 * i + 1] = (int16_t)lrint(8000 * sin(ph));
+            fm1_filter_run_at(&f, a, BLOCK, fm1_filter_swing(&f, BLOCK, -20, 7), 5);
+            for (i = 0; i < BLOCK; i++) {
+                sq += (double)a[2 * i] * a[2 * i];
+                if (n > 4 && fabs(a[2 * i] - prev) > biggest) biggest = fabs(a[2 * i] - prev);
+                prev = a[2 * i];
+            }
+            if (n > 20) {
+                if (sq < lo) lo = sq;
+                if (sq > hi) hi = sq;
+            }
+        }
+        d = 10 * log10(hi / lo);
+        printf("        (a 1700 Hz tone through an 850 Hz low-pass wobbling at 2 Hz: %.1f dB between its loudest and quietest; largest step %.0f)\n", d, biggest);
+        check("a tone above the cutoff comes and goes with the wobble (over 12 dB), with no click", d > 12 && biggest < 8000 * 4.0 * w * 1.6);
+    }
     puts(bad ? "FILTER TEST FAILED" : "FILTER TEST PASSED");
     return bad != 0;
 }
