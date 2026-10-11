@@ -1,13 +1,13 @@
 {
-  "version": "b11",
-  "file": "firmware/doom-b11.fwsc",
-  "sha256": "93265962d0ebe5506d0f8fc71cb74333a5e5d0d7f919e65f857b5766f47aa309",
+  "version": "b12",
+  "file": "firmware/doom-b12.fwsc",
+  "sha256": "28814e0a9bd7493007e67c5af85d6a12eb55e70875f4a3fdb69304972520a341",
   "product": "FM-1_666",
-  "build": 4276801510,
+  "build": 4213086501,
   "core": "9d99b4e4d399022c",
-  "img_len": 270848,
+  "img_len": 270844,
   "desc_at": 270880,
   "app_slot": 581564,
   "converter_sha256": "b625a72ac18ef6aafa949c8746e86a38df65f050566972da3149388d79c3a3cf",
-  "source_commit": "23c28d04170b9bcbaf4f90a7cd25a81d80be0940"
+  "source_commit": "b6fd5cdc9c6caad3619add8987b522fa5890ad42"
 }
