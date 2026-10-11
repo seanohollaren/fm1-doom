@@ -2051,7 +2051,7 @@ Gurvich).
 ## 2026-10-11 — What could ship: first figures for the drums and the four sounds on the device (desk work)
 
 Sean: "I'd like to start moving toward finding out what's actually feasible to ship in the firmware."
-Nothing here ran on the device. Sizes are MEASURED with the device's compiler (`firmware/build/probe/run.sh`:
+Nothing here ran on the device. Sizes are MEASURED with the device's compiler (`tools/size_probe.sh`:
 the JieLi pi32v2 clang at the firmware's own flags on `fm1_drums.c` and `fm1_felucca.c`, sizes from the
 objects' symbol tables); processor shares are ESTIMATES from Felucca's own figures.
 
