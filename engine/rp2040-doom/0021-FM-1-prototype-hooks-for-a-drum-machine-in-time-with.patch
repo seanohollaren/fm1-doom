@@ -1,0 +1,245 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 23:32:07 -0700
+Subject: [PATCH] FM-1: prototype hooks for a drum machine in time with the
+ song (FM1_DRUMS, off)
+
+Under FM1_DRUMS (set only by fm1-doom's prototype browser build) the song's drum notes go to
+fm1-doom's firmware/fm1_drums.c and not to the chip, and every sixteenth of the bar that falls
+before the music's next event is given a callback timed from the event before it, so the drums
+run on the music's own clock. The small build's callback queue, which knows a callback by its
+argument, learns a third kind for these steps. S_ChangeMusic gives the song's tempo (E1M1 110,
+the title jingle 140, measured from their note times). SEQ steps through the patterns and ARP
+through the kits. opl_pico.c also says how far into a mixer pass a callback falls
+(fm1_pass_frames). Without the flag nothing else changes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ opl/opl_pico.c         | 15 ++++++++++++++
+ src/doom/s_sound.c     |  8 ++++++++
+ src/fm1/fm1_audio.c    |  6 ++++++
+ src/fm1/fm1_controls.c | 22 +++++++++++++++++++++
+ src/i_oplmusic.c       | 45 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 96 insertions(+)
+
+diff --git a/opl/opl_pico.c b/opl/opl_pico.c
+index eb3ee0e..61d336c 100644
+--- a/opl/opl_pico.c
++++ b/opl/opl_pico.c
+@@ -177,12 +177,19 @@ static void AdvanceTime(unsigned int nsamples)
+ #if LIMITED_CALLBACK_TYPES
+ extern void RestartSong(void *unused);
+ extern void TrackTimerCallback(void *track);
++#if FM1_DRUMS
++extern void FM1_DrumStep(void *step_plus_one);
++#endif
+ #endif
+ 
+ #if DOOM_TINY
+ extern uint8_t restart_song_state;
+ #endif
+ 
++#if FM1
++unsigned int fm1_pass_frames;               // frames of the pass being mixed that are already made
++#endif
++
+ void OPL_Pico_Mix_callback(audio_buffer_t *audio_buffer)
+ {
+     unsigned int filled, buffer_samples;
+@@ -253,6 +260,9 @@ void OPL_Pico_Mix_callback(audio_buffer_t *audio_buffer)
+             }
+ #endif
+             filled += nsamples;
++#if FM1
++            fm1_pass_frames = filled;       // (for a callback that wants to know where in the pass it is)
++#endif
+ 
+             // Invoke callbacks for this point in time.
+ 
+@@ -568,8 +578,13 @@ int OPL_Queue_Pop(opl_callback_queue_t *queue,
+     queue_entry_t *qe = get_entry(queue, id);
+ #if !LIMITED_CALLBACK_TYPES
+     *callback = qe->callback;
++#else
++#if FM1_DRUMS
++    // (a third kind for the drum machine's steps: data 1 .. 16, which no track's address is)
++    *callback = !qe->data ? RestartSong : (uintptr_t) qe->data <= 16 ? FM1_DrumStep : TrackTimerCallback;
+ #else
+     *callback = qe->data ? TrackTimerCallback : RestartSong;
++#endif
+ #endif
+     *data = qe->data;
+     return 1;
+diff --git a/src/doom/s_sound.c b/src/doom/s_sound.c
+index 0779a1d..2aae762 100644
+--- a/src/doom/s_sound.c
++++ b/src/doom/s_sound.c
+@@ -677,11 +677,19 @@ void S_StartMusic(int m_id)
+     S_ChangeMusic(m_id, false);
+ }
+ 
++#if FM1_DRUMS
++extern unsigned int fm1_drums_bpm100;       // i_oplmusic.c: the tempo the drum machine steps at
++#endif
++
+ void S_ChangeMusic(int musicnum, int looping)
+ {
+     musicinfo_t *music = NULL;
+     char namebuf[9];
+     void *handle;
++#if FM1_DRUMS
++    // the songs in the FM-1's data (measured from their note times): E1M1 is at 110, the title jingle at 140
++    fm1_drums_bpm100 = musicnum == mus_e1m1 ? 11000 : musicnum == mus_intro || musicnum == mus_introa ? 14000 : 12000;
++#endif
+ 
+     // The Doom IWAD file has two versions of the intro music: d_intro
+     // and d_introa.  The latter is used for OPL playback.
+diff --git a/src/fm1/fm1_audio.c b/src/fm1/fm1_audio.c
+index a20e48e..528ed00 100644
+--- a/src/fm1/fm1_audio.c
++++ b/src/fm1/fm1_audio.c
+@@ -43,12 +43,18 @@ audio_buffer_t *take_audio_buffer(audio_buffer_pool_t *ac, bool block)
+ #if FM1_FM6
+ void fm1_fm6_mix(int16_t *stereo, uint32_t frames);     // prototype: Felucca's FM engine playing the music's melodic notes
+ #endif
++#if FM1_DRUMS
++void fm1_drums_mix(int16_t *stereo, uint32_t frames);   // prototype: Felucca's drum voices, a beat under the music
++#endif
+ 
+ void give_audio_buffer(audio_buffer_pool_t *ac, audio_buffer_t *buffer)
+ {
+     (void)ac;
+ #if FM1_FM6
+     fm1_fm6_mix(fm1_mix, buffer->sample_count);
++#endif
++#if FM1_DRUMS
++    fm1_drums_mix(fm1_mix, buffer->sample_count);
+ #endif
+     for (uint32_t i = 0; i < buffer->sample_count; i++) {
+         uint32_t k = (fm1_w + i) & (FM1_RING_FRAMES - 1u);
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 9d310ba..52853be 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -56,6 +56,15 @@ const char *fm1_fm6_name(int n);
+ #else
+ #define FM1_FM6_PATCHES 0
+ #endif
++#if FM1_DRUMS
++// Prototype: SEQ brings in a beat under the song and steps through its patterns, ARP through its kits
++// (fm1-doom firmware/fm1_drums.c).
++extern volatile uint8_t fm1_drums_pattern, fm1_drums_kit;
++int fm1_drums_patterns(void);
++int fm1_drums_kits(void);
++const char *fm1_drums_pattern_name(int n);
++const char *fm1_drums_kit_name(int n);
++#endif
+ static uint8_t fm1_preset;                                   /* the PRESETS knob: 0 the music's own, then the patches and instruments */
+ static uint8_t fm1_page;                                     /* what KNOB 1 .. KNOB 4 do: */
+ enum { FM1_PAGE_MAIN, FM1_PAGE_ENV, FM1_PAGE_LFO };          /* filter and resonance, pitch, tempo; the envelope; the wobble */
+@@ -260,8 +269,21 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         } else
+             fm1_say("WOBBLE OFF", -1, "");
+     }
++#if FM1_DRUMS
++    if (pressed & (1u << FM1_BTN_SEQ)) {
++        fm1_drums_pattern = (uint8_t)((fm1_drums_pattern + 1) % (fm1_drums_patterns() + 1));
++        fm1_say("DRUMS: ", -1, fm1_drums_pattern_name(fm1_drums_pattern));
++    }
++    if (pressed & (1u << FM1_BTN_ARP)) {
++        fm1_drums_kit = (uint8_t)((fm1_drums_kit + 1) % fm1_drums_kits());
++        fm1_say("DRUM KIT ", -1, fm1_drums_kit_name(fm1_drums_kit));
++    }
++#endif
+     // EDIT: all of it as it was
+     if (pressed & (1u << FM1_BTN_EDIT)) {
++#if FM1_DRUMS
++        fm1_drums_pattern = 0;
++#endif
+         fm1_filter_pos = 0;
+         fm1_filter_wobble = 0;
+         fm1_music_instr = 0;
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index 5a80f0c..b15d40c 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -363,6 +363,20 @@ void fm1_fm6_note_on(int channel, int key, int note, int velocity, int volume);
+ void fm1_fm6_note_off(int channel, int key);
+ void fm1_fm6_channel_off(int channel);
+ #endif
++#if FM1_DRUMS
++// Prototype: a drum machine in time with the song (fm1-doom firmware/fm1_drums.c). While it plays, the chip's
++// percussion is silent; the song's drum notes go to it instead, and it is told of every sixteenth of the bar.
++extern volatile uint8_t fm1_drums_pattern;
++void fm1_drums_hit(int note, int volume);
++void fm1_drums_step(int step);
++unsigned int fm1_drums_bpm100 = 12000;      // the song's tempo, beats a minute x 100 (S_ChangeMusic knows the song)
++static unsigned int fm1_song_pos;           // ticks from the song's start to the event last scheduled from
++// (the callback queue of the small build knows its callbacks by their argument: a step is 1 .. 16, opl_pico.c)
++void FM1_DrumStep(void *arg)
++{
++    fm1_drums_step((int) (uintptr_t) arg - 1);
++}
++#endif
+ const char *fm1_music_instr_name(int n)
+ {
+     return main_instr_names && n >= 0 && n < GENMIDI_NUM_INSTRS ? main_instr_names[n] : "";
+@@ -1230,6 +1244,13 @@ static void KeyOnEvent(opl_track_data_t *track, midi_event_t *event)
+             return;
+         }
+ 
++#if FM1_DRUMS
++        if (fm1_drums_pattern)
++        {
++            fm1_drums_hit((int) key, (int) volume);
++            return;
++        }
++#endif
+         instrument = &percussion_instrs[key - 35];
+ 
+         last_perc[last_perc_count] = key;
+@@ -1632,6 +1653,9 @@ void RestartSong(void *unused)
+     unsigned int i;
+ 
+     running_tracks = num_tracks;
++#if FM1_DRUMS
++    fm1_song_pos = 0;
++#endif
+ 
+     start_music_volume = current_music_volume;
+ 
+@@ -1707,6 +1731,24 @@ static void ScheduleTrack(opl_track_data_t *track)
+ #if FM1_WEB
+     fm1_music_ticks += nticks;
+ #endif
++#if FM1_DRUMS
++    {
++        // Every sixteenth that falls before the next event gets a callback of its own, timed from this
++        // event: the drums follow the music's own clock. A tick is 1/140 s; a sixteenth is 2100 / bpm ticks.
++        uint64_t step = ((uint64_t) 210000 << 16) / fm1_drums_bpm100;       // ticks, 16.16
++        uint64_t from = (uint64_t) fm1_song_pos << 16;
++        uint64_t to = from + ((uint64_t) nticks << 16);
++        uint64_t s;
++
++        for (s = (from + step - 1) / step; s * step < to; s++)
++        {
++            uint64_t wait = (((s * step - from) * us_per_beat) / ticks_per_beat) >> 16;
++            OPL_SetCallback((wait * fm1_music_time) >> 16, FM1_DrumStep,
++                            (void *) (uintptr_t) ((s & 15) + 1));
++        }
++        fm1_song_pos += nticks;
++    }
++#endif
+ 
+     // Set a timer to be invoked when the next event is
+     // ready to play.
+@@ -1766,6 +1808,9 @@ static void I_OPL_PlaySong(void *handle, boolean looping)
+     num_tracks = MIDI_NumTracks(file);
+     running_tracks = num_tracks;
+     song_looping = looping;
++#if FM1_DRUMS
++    fm1_song_pos = 0;
++#endif
+ 
+     ticks_per_beat = MIDI_GetFileTimeDivision(file);
+ 
