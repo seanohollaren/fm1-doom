@@ -1901,3 +1901,27 @@ Sean on the first pass: it works, but "not the kind of aggressive punchy drums t
   reload: the new page, the stamped files, `no-store`.
 - LESSON for my own checks: I had confirmed the page with curl and the game with Node, neither of which has a
   cache. A page meant for Sean's browser has to be looked at in a browser.
+
+## 2026-10-11 — Recorded takes for Sean to review away from the computer (a private page, not the site)
+
+- He asked for a page on the site with recordings of the prototype's settings, to be merged and deployed from
+  GitHub. Two things stood in the way of doing exactly that, so the page is a private one instead
+  (https://claude.ai/artifact/QmL1iJKpxRVwip15HRVbXG, open only to him):
+  1. `controls-b8` serves firmware b14 from the installer, and no build after b7 has run on an FM-1 that I know
+     of. Merging the branch would put untested firmware in front of the public; the site's rule is that only a
+     build that has run on a device goes on it.
+  2. The recordings are Doom's own music and sounds. Deployed from GitHub they would have to be committed to
+     the public repository, where they would stay in its history; the project keeps game data and what is made
+     from it out of the repository (`web/samples/` is ignored for that reason).
+  If he still wants a page on the site: a branch off `main` with only that page would leave the installer alone;
+  the second point is his to weigh.
+- `web/record_sample.js OUT.wav PATTERN KIT LEVEL DIP PATCH` (new) records the same four bars of E1M1 (bars 5 to
+  8, found with a new test hook for the song's position) from the prototype build with one set of settings, so
+  takes differ only in the settings. 45 takes: the game's own; drum level 1 to 3 against music dip 1 to 4 on
+  double bass and on a rock beat (METAL kit); all nine patterns and all eight kits at level 2, dip 2; Felucca's
+  eight FM patches; one with drums and a patch together. MP3, 96 kbit/s mono, 4.6 MB in all.
+- The page plays a take on a loop, carries on from the same place in the bar when another is tapped, and lets
+  him keep takes and copy the list. NOT VERIFIED on a phone by me; the files are served as audio/mpeg.
+- The measured levels of the takes, for when he reports back (RMS of the whole mix; the game's own is 2,204):
+  double bass at level 1 / 2 / 3 is about 3,700 / 4,800 / 6,500; rock 3,000 / 3,800 / 5,000; the dip changes
+  the RMS by under 3 %.

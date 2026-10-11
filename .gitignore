@@ -17,6 +17,8 @@ tiny.whd.h
 /host-build/
 /web/build/
 /web/build-fm6/
+# recordings of the game for review: made from game data, never committed
+/web/samples/
 /firmware/build/
 /sizecheck/obj/
 /sizecheck/*.elf

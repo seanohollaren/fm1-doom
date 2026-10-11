@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 11:53:49 -0700
+Subject: [PATCH] FM-1: the drum machine prototype's test hook also says how
+ far into the song the music is
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/i_oplmusic.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index a19017f..f155d4d 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -397,7 +397,8 @@ static int voice_alloced_num;
+ // what 0: its instrument, 0..127 melodic, 128 up percussion; 1: its frequency register (octave << 10 | number);
+ // 2: its modulator's level, 0 loudest .. 63; 4: its note as written, before the pitch knob.
+ // what 3: how many of the music's ticks have been played so far.  what 5, 6, 7: the envelope last written by the
+-// envelope knobs (flags, attack << 4 | decay, sustain << 4 | release).
++// envelope knobs (flags, attack << 4 | decay, sustain << 4 | release).  what 8 (the drum machine's build): how far
++// into the song the music is, in ticks.
+ static unsigned int fm1_music_ticks;
+ static int fm1_shape_log[3];
+ int fm1_music_probe(int what, int i)
+@@ -412,6 +413,12 @@ int fm1_music_probe(int what, int i)
+     {
+         return fm1_shape_log[what - 5];
+     }
++#if FM1_DRUMS
++    if (what == 8)
++    {
++        return (int) fm1_song_pos;      // ticks from the song's start to the event last scheduled from
++    }
++#endif
+     if (i < 0 || i >= voice_alloced_num)
+     {
+         return -1;
