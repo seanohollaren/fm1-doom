@@ -34,5 +34,7 @@ $CC -Wextra -o $T/volume_test firmware/tests/volume_test.c        # the MASTER k
 run "volume: firmware/dev_volume.h" $T/volume_test
 $CC -Wextra -I rp2040-doom/src/fm1 -o $T/filter_test firmware/tests/filter_test.c -lm   # the filter on KNOB 1 / KNOB 2
 run "filter: rp2040-doom/src/fm1/fm1_filter.h" $T/filter_test
+$CC -Wextra -I rp2040-doom/src/fm1 -o $T/osd_test firmware/tests/osd_test.c            # the large message line
+run "message line: rp2040-doom/src/fm1/fm1_osd.h" $T/osd_test
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

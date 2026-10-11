@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 21:14:44 -0700
+Subject: [PATCH] FM-1: what a knob or button has just done is written large
+ across the top of the picture
+
+fm1_osd.h: capitals 5 dots by 7, each dot 2 x 2 panel pixels, in lines of 20 on a band dimmed to a
+quarter, for three seconds; about twice the size the game's own message font has on the panel.
+fm1_video.c draws it into each panel row as it goes out, so it is sharp (the game's picture is
+squeezed 4 to 3 on its way to the panel) and also shows over the title and the menus. The game's own
+messages are not changed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1.h          |   1 +
+ src/fm1/fm1_controls.c |  13 ++--
+ src/fm1/fm1_osd.h      | 159 +++++++++++++++++++++++++++++++++++++++++
+ src/fm1/fm1_video.c    |   9 +++
+ 4 files changed, 176 insertions(+), 6 deletions(-)
+ create mode 100644 src/fm1/fm1_osd.h
+
+diff --git a/src/fm1/fm1.h b/src/fm1/fm1.h
+index e897ead..e96ddfa 100644
+--- a/src/fm1/fm1.h
++++ b/src/fm1/fm1.h
+@@ -49,6 +49,7 @@ void fm1_audio_read(int16_t *dst, uint32_t frames, uint32_t out_rate);
+ extern uint32_t fm1_audio_underruns;
+ 
+ void fm1_present(void);                  // fm1_video.c: show the frame the game has finished
++void fm1_osd_say(const char *text);      // ... with this written large across its top for a few seconds (fm1_osd.h)
+ extern uint32_t fm1_frames;
+ // picture shape on the square panel (fm1_video.c): 240x150 (square pixels), 240x180 (4:3), 240x240 (stretched)
+ void fm1_view_next(void);
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 8c1025f..66e09e4 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -9,7 +9,7 @@
+ //   right hand, top of the keyboard:  F5 fire   G5 use (open doors)   F#5 run
+ //   buttons:  HOME menu (Esc)   PLAY select (Enter)   REC fire   OCT- / OCT+ previous / next weapon   FX yes
+ //             SCL next picture shape   GLO show the frame rate
+-//             (those two answer with a line on the game's message display, so only while a level is up)
++//   Whatever a button or knob below changes is said in large letters across the top of the picture (fm1_osd.h).
+ //   knobs:    SELECT moves through menus, and changes weapon while playing
+ //   the synth's own tricks. On the music itself, which an FM chip plays (i_oplmusic.c):
+ //             PRESETS    the instrument: as written at the bottom, then the game's own 128 one after another
+@@ -47,7 +47,7 @@ static int8_t fm1_tempo;                                     /* -FM1_TEMPO_STEPS
+ static uint8_t fm1_page;                                     /* what KNOB 3 and KNOB 4 do: 0 pitch and tempo, 1 envelope and wobble */
+ 
+ static char fm1_msg[40];
+-static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n < 0: no number) on the HUD */
++static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n < 0: no number), large across the picture */
+ {
+     char *p = fm1_msg, t[12];
+     int i = 0;
+@@ -63,17 +63,18 @@ static void fm1_say(const char *a, int n, const char *b)     /* "<a><n><b>" (n <
+     while (*b && p < fm1_msg + 39)
+         *p++ = *b++;
+     *p = 0;
+-    players[consoleplayer].message = fm1_msg;
++    fm1_osd_say(fm1_msg);
+ }
+ 
+-static void fm1_say_more(const char *s)                     /* ... and a name after it, in the HUD's capitals */
++static void fm1_say_more(const char *s)                     /* ... and more after it */
+ {
+     char *p = fm1_msg;
+     while (*p)
+         p++;
+-    for (; *s && p < fm1_msg + 39; s++)
+-        *p++ = (char)(*s >= 'a' && *s <= 'z' ? *s - 32 : *s);
++    while (*s && p < fm1_msg + 39)
++        *p++ = *s++;
+     *p = 0;
++    fm1_osd_say(fm1_msg);
+ }
+ 
+ static int fm1_turn(int now, int steps, int lo, int hi)      /* a knob's setting after some clicks, kept in range */
+diff --git a/src/fm1/fm1_osd.h b/src/fm1/fm1_osd.h
+new file mode 100644
+index 0000000..ebdd7e1
+--- /dev/null
++++ b/src/fm1/fm1_osd.h
+@@ -0,0 +1,159 @@
++// FM-1: the message line, drawn large. What a knob or button has just done ("LOW PASS 955 HZ",
++// "MUSIC 20 CHURCH ORGAN") is written across the top of the picture at the panel's own resolution, about twice the
++// size of the game's own message font as the panel shows it: capitals 5 dots by 7, each dot 2 by 2 pixels, in
++// lines of 20 characters on a darkened band, for three seconds. fm1_video.c draws it into each panel row as it
++// goes out; fm1_controls.c says what to write. The game's own messages ("PICKED UP A CLIP") are not touched.
++// The letters were drawn for this file. firmware/tests/osd_test.c in the fm1-doom repository tests it on a PC.
++//
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++#include <stdint.h>
++
++#define FM1_OSD_COLS 20                 // characters a line
++#define FM1_OSD_LINES 3
++#define FM1_OSD_CELL_W 12               // a character's pixels: 5 dots and a gap, twice over
++#define FM1_OSD_LINE_H 18               // 7 dots twice over, and 4 pixels to the next line
++#define FM1_OSD_PAD 4                   // band above the first line and below the last
++#define FM1_OSD_MS 3000u                // how long a message stays
++
++// the dots of characters 32 (space) to 95, seven rows each, the leftmost dot in bit 4
++static const uint8_t FM1_OSD_FONT[64][7] = {
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   //  
++    {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04},   // !
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // "
++    {0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A},   // #
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // $
++    {0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03},   // %
++    {0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D},   // &
++    {0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00},   // '
++    {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02},   // (
++    {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08},   // )
++    {0x00, 0x15, 0x0E, 0x1F, 0x0E, 0x15, 0x00},   // *
++    {0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00},   // +
++    {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08},   // ,
++    {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00},   // -
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},   // .
++    {0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10},   // /
++    {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},   // 0
++    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},   // 1
++    {0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F},   // 2
++    {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E},   // 3
++    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},   // 4
++    {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},   // 5
++    {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},   // 6
++    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},   // 7
++    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},   // 8
++    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},   // 9
++    {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00},   // :
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ;
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // <
++    {0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00},   // =
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // >
++    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04},   // ?
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // @
++    {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},   // A
++    {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},   // B
++    {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E},   // C
++    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E},   // D
++    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},   // E
++    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},   // F
++    {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F},   // G
++    {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},   // H
++    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},   // I
++    {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C},   // J
++    {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},   // K
++    {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},   // L
++    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11},   // M
++    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11},   // N
++    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},   // O
++    {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},   // P
++    {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D},   // Q
++    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},   // R
++    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},   // S
++    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},   // T
++    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},   // U
++    {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04},   // V
++    {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11},   // W
++    {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},   // X
++    {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},   // Y
++    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},   // Z
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // [
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // backslash
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ]
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ^
++    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // _
++};
++
++typedef struct {
++    char text[FM1_OSD_LINES][FM1_OSD_COLS + 1];
++    uint8_t lines;                      // 0: nothing to show
++    uint32_t until;                     // on the millisecond clock
++} fm1_osd_t;
++
++// Take a message: capitals, broken into lines at its spaces (a word longer than a line is cut; what does not fit
++// in the lines there are is dropped).
++static void fm1_osd_set(fm1_osd_t *o, const char *s, uint32_t now)
++{
++    int line = 0, col = 0;
++    while (*s == ' ')
++        s++;
++    while (*s && line < FM1_OSD_LINES) {
++        int n = 0, i;
++        while (s[n] && s[n] != ' ')
++            n++;
++        if (col && col + 1 + n > FM1_OSD_COLS) {            // the word goes on the next line
++            o->text[line++][col] = 0;
++            col = 0;
++            continue;
++        }
++        if (col)
++            o->text[line][col++] = ' ';
++        for (i = 0; i < n && col < FM1_OSD_COLS; i++) {
++            char c = s[i];
++            o->text[line][col++] = (char)(c >= 'a' && c <= 'z' ? c - 32 : c);
++        }
++        s += n;
++        while (*s == ' ')
++            s++;
++    }
++    if (line < FM1_OSD_LINES)
++        o->text[line++][col] = 0;
++    o->lines = (uint8_t)(col || line > 1 ? line : 0);
++    o->until = now + FM1_OSD_MS;
++}
++
++static inline int fm1_osd_on(const fm1_osd_t *o, uint32_t now) { return o->lines && (int32_t)(o->until - now) > 0; }
++// how many panel rows the band takes from its top
++static inline int fm1_osd_height(const fm1_osd_t *o) { return 2 * FM1_OSD_PAD + o->lines * FM1_OSD_LINE_H - 4; }
++
++// One panel row of `width` pixels (RGB565 with its two bytes swapped, as the panel takes them), `y` rows below
++// the top of the band: the picture is dimmed to a quarter, and the row's dots are written in white.
++static void fm1_osd_row(const fm1_osd_t *o, uint16_t *px, int width, int y)
++{
++    int i, r, line, dot;
++    const char *t;
++    if (y < 0 || y >= fm1_osd_height(o))
++        return;
++    for (i = 0; i < width; i++) {
++        uint16_t v = (uint16_t)(px[i] << 8 | px[i] >> 8);
++        v = (uint16_t)((v >> 2) & 0x39E7u);
++        px[i] = (uint16_t)(v << 8 | v >> 8);
++    }
++    r = y - FM1_OSD_PAD;
++    if (r < 0)
++        return;
++    line = r / FM1_OSD_LINE_H;
++    dot = r % FM1_OSD_LINE_H / 2;
++    if (line >= o->lines || dot >= 7)
++        return;
++    t = o->text[line];
++    for (i = 0; t[i]; i++)
++        ;
++    px += (width - (i * FM1_OSD_CELL_W - 2)) / 2;           // the line centred
++    for (; *t; t++, px += FM1_OSD_CELL_W) {
++        unsigned c = (unsigned char)*t - 32u, bits = c < 64u ? FM1_OSD_FONT[c][dot] : 0u;
++        for (i = 0; bits; i += 2, bits = (bits << 1) & 0x1Fu)
++            if (bits & 0x10u)
++                px[i] = px[i + 1] = 0xFFFFu;
++    }
++}
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index 1023476..719d38a 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -610,6 +610,12 @@ void fm1_view_next(void)
+ }
+ const char *fm1_view_name(void) { return FM1_VIEW_NAMES[fm1_view]; }
+ 
++// what a knob or button has just done, written large across the top of the picture (fm1_osd.h)
++#include "fm1_osd.h"
++#define FM1_OSD_TOP 4                      /* panel rows from the top of the picture to the band */
++static fm1_osd_t fm1_osd;
++void fm1_osd_say(const char *text) { fm1_osd_set(&fm1_osd, text, fm1_millis()); }
++
+ static uint32_t fm1_line[SCREENWIDTH / 2 + 2];             /* one composed scanline, RGB565 (word aligned) */
+ // two strip buffers, used in turn: the platform may still be sending one (DMA) while the next is composed.
+ // fm1_lcd_blit's pixels must stay untouched until the following fm1_lcd_blit call has returned.
+@@ -630,6 +636,7 @@ static void fm1_squeeze(uint16_t *out, const uint16_t *in) {
+ void fm1_present(void) {
+     int out_y = 0, n = 0, acc = 0;
+     const int rows = FM1_VIEW_ROWS[fm1_view], view_y = (FM1_LCD_H - rows) / 2;
++    const int osd = fm1_osd_on(&fm1_osd, fm1_millis());
+     uint16_t *fm1_strip = fm1_strips[fm1_strip_i];
+     fm1_alive();
+     fm1_audio_pump();
+@@ -676,6 +683,8 @@ void fm1_present(void) {
+         /* this source line becomes 0, 1 or 2 panel rows (the patches above had to advance through it anyway) */
+         for (acc += rows; acc >= SCREENHEIGHT; acc -= SCREENHEIGHT) {
+             fm1_squeeze(fm1_strip + n * FM1_LCD_W, dest);
++            if (osd)
++                fm1_osd_row(&fm1_osd, fm1_strip + n * FM1_LCD_W, FM1_LCD_W, out_y + n - FM1_OSD_TOP);
+             if (++n == FM1_STRIP_H) {
+                 fm1_lcd_blit(0, (unsigned)(view_y + out_y), FM1_LCD_W, (unsigned)n, fm1_strip);
+                 fm1_strip = fm1_strips[fm1_strip_i ^= 1];
