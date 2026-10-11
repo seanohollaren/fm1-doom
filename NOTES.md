@@ -1742,3 +1742,38 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
   would be at build time, not on the device; the game heap in the other region is untouched (233 KB).
 - NOT VERIFIED until it runs on the FM-1: the size and legibility on the real panel (red on a dark ceiling is
   how the game does it, but there is no band to help over a bright wall).
+
+## 2026-10-10 — Build "b14": ENV gives four envelope knobs, LFO the wobble (built and Mac-tested; NOT installed)
+
+- Sean on b10's single envelope knob (heard in the browser build or on the device, he did not say which):
+  "anything lower than Envelope Short 1 seems to crunch it so much that to my ear there's almost no difference
+  between Envelope Short 2 and Envelope Short 6", and asked for attack, decay and so on as separate controls, all
+  four knobs turning into envelope knobs on ENV, as he recalled a synth firmware doing.
+- VERIFIED in Felucca's source: its operator envelope pages do hold attack, decay, sustain, release (and level)
+  per operator (`fm4_convert.c`, `P_FM1_ATK` on). NOT CHECKED: which knob is which there, and Baud Girl.
+- CAUSE of his finding, MEASURED: the short steps set decay rates 7 to 12, and E1M1's guitars scale their rates
+  with pitch (KSR), so all but the first were a click (RMS 700, then 580 .. 160). The rates a listener can tell
+  apart in this music are 1 to 8 for a decay, 1 to 6 for an attack, 2 to 9 for a release.
+- **Now** (engine patch 0019). ENV: KNOB 1 attack (6 steps: rate 6 down to 1), KNOB 2 decay (8 steps: rate 8 down
+  to 1), KNOB 3 sustain (10 steps: silence, 30 dB down .. full; the note is held there), KNOB 4 release (8
+  steps: rate 9 down to 2); a higher number is longer, or for sustain louder; the bottom of each is the
+  instrument's own ("ORIGINAL ATTACK", after Sean's "ORIGINAL MUSIC"). As before they act on the operators that
+  are heard, of every voice, at once. A sustain setting on an instrument with no decay of its own (E1M1's
+  guitars: attack 15, decay 0, sustain 15, release 15, not held) gives it decay rate 6, or the knob would do
+  nothing. LFO: KNOB 1 is the wobble's speed (it was KNOB 4 behind ENV). ENV or LFO again, or EDIT, gives the
+  knobs their first jobs back; what was set stays in force, except after EDIT.
+- MEASURED per step in the browser build (RMS of 2.5 s of the music, which itself moves between about 1900 and
+  2600): attack 2509, 1931, 1842, 1755, 315, 47; decay 1069, 1060, 1417, 1747, 1877, 2385, 2723, (1932); sustain
+  969 rising to 3083; release: the level swing falls 24 dB -> 2.5 dB and the RMS rises to 5191 (nine voices
+  ringing). So attack 6 all but silences fast music, and release 7 and 8 are about 7 dB louder than the tune.
+- Tests: `web/test_sound_knobs.js` now reads the envelope back from what was written to the chip (probe 5 to 7)
+  for each knob's first step, a middle one and its top, and the wobble from the filter's position (probe
+  `fm1_web_filter_at`: -22 swinging between -29.7 and -14.0), 34 checks; the message tests carry the new
+  messages. All browser-build tests pass.
+- b14: firmware 270,792 B, build id `029458be`, recovery core id unchanged (`9d99b4e4d399022c`);
+  `tools/core_diff.py` b13 -> b14: all 69 functions the same instructions. `doom_part1.fwsc` SHA-256
+  `a69f245d…ff3b1ba6`, `doom_code.fwsc` `672906bb…fa8776e6`; data block 2 unchanged; block 1 has 15,704 B
+  spare. 19 package runs pass; predicted flash passes `check_dump.py`. Symbols:
+  `firmware/installed_a69f245d/`. Source commit `e658754`.
+- NOT VERIFIED until it runs on the FM-1: everything about how it sounds there; that KNOB 1 to KNOB 4 are the
+  encoders in that order.
