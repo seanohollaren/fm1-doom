@@ -1887,3 +1887,17 @@ Sean on the first pass: it works, but "not the kind of aggressive punchy drums t
   recording) and flash: about 2 to 4 KB a hit at 22 kHz 8-bit, against 15.7 KB spare, so a kick, a snare and a
   cymbal at most beside nothing else; (2) the game's own sounds as a kit (a shotgun for a snare), which are in
   flash already and cost nothing; (3) more voicing of what is there.
+
+## 2026-10-11 — Why Sean did not see the second pass: the browser's cache
+
+- He loaded the prototype page and saw the first pass's patterns and kits. VERIFIED: the server had the new
+  files (curl: the new wasm, 1,077,822 B); the in-app browser, asked for the same address, showed the old
+  page and loaded the old `doom.js` and `doom.wasm` without asking the server. Python's plain `http.server`
+  sends a last-modified date and nothing else, and a browser then reuses its copy for a share of the file's
+  age: hours, for a page a day old.
+- Fixed: `web/serve.py DIR PORT` (new) serves a build to this computer only with `Cache-Control: no-store`;
+  `web/build.sh` writes the build's time into the page ("built 11 Oct 10:15" under the picture) and into the
+  addresses of the two game files. The two preview entries use it. VERIFIED in the in-app browser after one
+  reload: the new page, the stamped files, `no-store`.
+- LESSON for my own checks: I had confirmed the page with curl and the game with Node, neither of which has a
+  cache. A page meant for Sean's browser has to be looked at in a browser.
