@@ -1,10 +1,10 @@
-// Headless check of the PROTOTYPE browser build in which Felucca's synth plays the music's melodic notes
-// (FM6=1 web/build.sh -> web/build-fm6; firmware/fm1_felucca.c). PRESETS 1 .. 66 are its factory presets, engine
-// by engine, each with the chorus, delay and reverb it sets. With a file name, also records what each sounds
-// like on E1M1, one after another, as a WAV.
-//   node web/test_felucca.js [OUT.wav]
-const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build-fm6');
-const out = process.argv[2], SECONDS = out ? 7 : 2.5, PRESETS_N = 66, RAVE = 7;
+// Headless check, in the browser build that has what the firmware has (web/build.sh), of the
+// synth that plays the music's melodic notes (firmware/fm1_synth.c): PRESETS 1 .. 3 are Felucca's SAW LEAD, ACID
+// and RAVE with their chorus, delay and reverb, then the game's own instruments. (That the synth gives Felucca's
+// own samples is firmware/tests/synth_test.c's job.) With a file name, also records each on E1M1 as a WAV.
+//   node web/test_synth.js [OUT.wav]
+const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build');
+const out = process.argv[2], SECONDS = out ? 7 : 4, PRESETS_N = 3, RAVE = 3;
 globalThis.Module = {
   locateFile: f => path.join(B, f),
   print: s => { if (/Error|error|panic/.test(s)) console.log('[game]', s); },
@@ -27,26 +27,26 @@ globalThis.Module = {
       const under = M._fm1_web_underruns();
       const own = await listen(SECONDS * 1000, true);
       check('the music as the game has it: the chip plays the melody, the engine nothing', own.most === 0 && own.chip.includes('melodic'), `rms ${own.rms.toFixed(0)}, peak ${own.peak}; chip: ${own.chip}`);
-      check(`Felucca's synth has ${PRESETS_N} presets for notes`, M._fm1_fm6_count() === PRESETS_N, `${M._fm1_fm6_count()}`);
+      check(`the synth has ${PRESETS_N} sounds`, M._fm1_fm6_count() === PRESETS_N, `${M._fm1_fm6_count()}`);
       const failed = [], levels = []; let rave = null;
       for (let n = 1; n <= PRESETS_N; n++) {
         await turn(PRESETS, 1);
         const said = M._fm1_web_osd();
         await sleep(700);
         const l = await listen(SECONDS * 1000, true);
-        const ok = l.most >= 1 && l.most <= 10 /* eight, and one or two fading out under a stolen note */ && !l.chip.includes('melodic') && l.rms > 150 && !l.clipped && (said & 255) >= 1 && !(said >> 8);
+        const ok = l.most >= 2 && l.most <= 4 /* a line for each of the music's channels */ && l.rms > own.rms * 0.6 && !l.chip.includes('melodic') && l.rms > 150 && !l.clipped && (said & 255) >= 1 && !(said >> 8);
         levels.push(`${n}:${l.rms.toFixed(0)}`);
         if (!ok) failed.push(`${n} (rms ${l.rms.toFixed(0)}, peak ${l.peak}, ${l.most} voices, chip ${l.chip}, message ${said})`);
-        if (n === RAVE) rave = { ...l, parts: M._fm1_fm6_parts(), chord: M._fm1_fm6_chord() };
+        if (n === RAVE) rave = { ...l, parts: M._fm1_fm6_parts() };
       }
-      check(`PRESETS 1 .. ${PRESETS_N}: each plays the melody (eight voices at most, and any fading out) with the chip only on drums, nothing clipped, and its name fits the screen`,
+      check(`PRESETS 1 .. ${PRESETS_N}: each plays the melody (a line for each of the music's channels) about as loud as the chip did, with the chip only on drums, nothing clipped, and its name fits the screen`,
         failed.length === 0, failed.length ? 'not: ' + failed.join('; ') : 'rms ' + levels.join(' '));
-      check(`PRESETS ${RAVE} (ANALOG RAVE, which Felucca plays one note at a time): each of the music's channels has a part of its own`, rave && rave.parts >= 2,
-        rave ? `${rave.parts} parts, ${rave.most} voices at most; the most notes one channel held at once: ${rave.chord}` : '');
+      check(`PRESETS ${RAVE} (RAVE): each of E1M1's three channels has a line of its own`, rave && rave.parts === 3,
+        rave ? `${rave.parts} lines, ${rave.most} sounding at most` : '');
       await turn(PRESETS, 1); await sleep(2500);
       const ninth = await listen(3000, false);
       check(`PRESETS ${PRESETS_N + 1}: the game's first instrument, on the chip again; the synth's voices end`, ninth.chip.includes('melodic') && M._fm1_fm6_voices() === 0, `chip: ${ninth.chip}`);
-      await turn(PRESETS, -(PRESETS_N + 1 - 3)); await turn(K3, 12); await sleep(1500);       // preset 3, an octave up
+      await turn(PRESETS, -1); await turn(K3, 12); await sleep(1500);                    // RAVE, an octave up
       const up = await listen(2500, false);
       await tap(EDIT); await sleep(2500);
       const back = await listen(3000, false);
@@ -57,9 +57,9 @@ globalThis.Module = {
         const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20);
         h.writeUInt16LE(1, 22); h.writeUInt32LE(44100, 24); h.writeUInt32LE(88200, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
         fs.writeFileSync(out, Buffer.concat([h, pcm]));
-        console.log(`  wrote ${out}: ${(tape.length / 44100).toFixed(0)} s, the game's own music then the ${PRESETS_N} presets, about ${SECONDS} s each`);
+        console.log(`  wrote ${out}: ${(tape.length / 44100).toFixed(0)} s, the game's own music then the ${PRESETS_N} sounds, about ${SECONDS} s each`);
       }
-      console.log(bad ? `FELUCCA'S SYNTH IN THE GAME: FAILED (${bad})` : "FELUCCA'S SYNTH IN THE GAME: PASSED");
+      console.log(bad ? `THE SYNTH IN THE GAME: FAILED (${bad})` : "THE SYNTH IN THE GAME: PASSED");
       process.exit(bad ? 1 : 0);
     })();
   },

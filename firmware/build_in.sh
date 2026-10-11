@@ -4,7 +4,8 @@ cd /p
 CC="/opt/jieli/pi32v2/bin/clang -target pi32v2"
 OUT=firmware/build; OBJ=$OUT/obj; mkdir -p $OBJ
 D=""; for d in $(cat sizecheck/defs.txt); do case $d in TINY_WAD_ADDR=*|FM1_SHORTPTR_BASE=*) ;; *) D="$D -D$d";; esac; done
-D="$D -DFM1=1 -DFM1_DEVICE=1 -DFM1_SHORTPTR_BASE=0x01C3C000 -Dmalloc=fm1_malloc -Dcalloc=fm1_calloc -Dfree=fm1_free"
+# FM1_DRUMS, FM1_FM6: the drum machine under the music and the synth that can play it (firmware/fm1_sound.c)
+D="$D -DFM1=1 -DFM1_DEVICE=1 -DFM1_DRUMS=1 -DFM1_FM6=1 -DFM1_SHORTPTR_BASE=0x01C3C000 -Dmalloc=fm1_malloc -Dcalloc=fm1_calloc -Dfree=fm1_free"
 I="-Irp2040-doom/src/fm1/shim -Isizecheck/stubs -Irp2040-doom/src -Irp2040-doom/src/doom -Irp2040-doom/src/pico -Irp2040-doom/src/fm1 -Irp2040-doom/opl -Irp2040-doom/textscreen -Irp2040-doom/src/adpcm-xq -Irp2040-doom"
 for d in pico-sdk/src/common/*/include pico-sdk/src/host/*/include pico-extras/src/common/*/include pico-sdk/src/rp2_common/pico_stdio/include pico-extras/src/rp2_common/pico_scanvideo_dpi/include; do I="$I -I$d"; done
 FILES="src/pd_render.cpp src/fm1/fm1_video.c $(cat sizecheck/files.txt | tr ' ' '\n' | grep -v pd_render | tr '\n' ' ') src/pico/i_picosound.c opl/opl_pico.c ../pico-sdk/src/common/pico_util/pheap.c src/fm1/fm1_audio.c src/fm1/fm1_controls.c src/fm1/fm1_platform.c src/fm1/fm1_sdk.c"
@@ -30,9 +31,11 @@ F=Felucca/firmware
 $CC -c $F/crt0.S -o $OBJ/crt0.o && $CC -c $F/hal/fm1_vec.S -o $OBJ/fm1_vec.o && $CC -c $F/hal/fm1_isr.S -o $OBJ/fm1_isr.o || fail=1
 $CC -Os -ffunction-sections -fno-builtin -Wall -Wno-unused-function -Ifirmware/build/gen -I$F/hal -I$F/src -Irp2040-doom/src/fm1 -c firmware/doom_dev.c -o $OBJ/doom_dev.o 2>$OUT/err.tmp || { echo "FAIL doom_dev.c"; grep -m12 "error" $OUT/err.tmp; fail=1; }
 $CC -Os -ffunction-sections -fno-builtin -isystem /opt/jieli/pi32v2/include -c firmware/fm1_printf.c -o $OBJ/fm1_printf.o 2>$OUT/err.tmp || { echo "FAIL fm1_printf.c"; grep -m6 "error" $OUT/err.tmp; fail=1; }
+# the drum machine and the synth: Felucca's dsp.c and drum_voice.c with our own files, one unit (its statics go to .bss, in the window)
+$CC -Os -ffunction-sections -fdata-sections -fno-builtin -w -isystem /opt/jieli/pi32v2/include -Ifirmware -IFelucca/build/gen -I$F/src -DFM1_DEVICE=1 -c firmware/fm1_sound.c -o $OBJ/fm1_sound.o 2>$OUT/err.tmp || { echo "FAIL fm1_sound.c"; grep -m8 "error" $OUT/err.tmp; fail=1; }
 [ $fail = 0 ] || exit 1
 touch $STAMP
-/opt/jieli/pi32v2/bin/ld --gc-sections -e _start -T firmware/doom.ld $OBJ/crt0.o $OBJ/fm1_vec.o $OBJ/fm1_isr.o $OBJ/doom_dev.o $OBJ/fm1_printf.o $OBJS \
+/opt/jieli/pi32v2/bin/ld --gc-sections -e _start -T firmware/doom.ld $OBJ/crt0.o $OBJ/fm1_vec.o $OBJ/fm1_isr.o $OBJ/doom_dev.o $OBJ/fm1_printf.o $OBJS $OBJ/fm1_sound.o \
    --start-group /opt/jieli/pi32v2/lib/libc.a /opt/jieli/pi32v2/lib/libcompiler-rt.a /opt/jieli/pi32v2/lib/libm.a --end-group -Map $OUT/doom.map -o $OUT/doom.elf 2>$OUT/link.err || { sort -u $OUT/link.err | head -60; exit 1; }
 /opt/jieli/common/bin/objdump -h $OUT/doom.elf | grep -E "^ +[0-9]+ \." 
 /opt/jieli/common/bin/objdump -t $OUT/doom.elf > $OUT/doom.syms

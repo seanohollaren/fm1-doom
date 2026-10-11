@@ -1,30 +1,23 @@
-// Record four bars of E1M1 from the PROTOTYPE browser build (web/build-fm6) with one set of the prototype's
-// settings, always the same four bars of the song (bars 5 to 8), so that takes can be compared.
-//   node web/record_sample.js OUT.wav PATTERN KIT LEVEL DIP PATCH [CHORDS]
-// PATTERN 0 off, 1 .. 8 the machine's patterns, 9 the song's own drum part; KIT 0 .. 12 (8 .. 12 are on Felucca's
-// limiter); LEVEL 1 .. 5 (3 is the kit's own); DIP 1 .. 5 (4 is the kit's own, 1 none; on a limiter kit it is how
-// hard the music goes in: x0.7, x1, x1.4, x2, x2.8); PATCH 0 the game's own music, 1 .. 66 Felucca's presets (7 is
-// ANALOG RAVE; 13 .. 20 the FM6 patches that were 1 .. 8 in the first takes); CHORDS 1: a preset Felucca plays one
-// note at a time plays chords.
-const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build-fm6');
-const [out, pattern, kit, level, dip, patch, chords] = [process.argv[2], ...process.argv.slice(3).map(Number)];
+// Record four bars of E1M1 from the browser build (web/build) with a drum beat and a sound chosen, always the same
+// four bars of the song (bars 5 to 8), so that takes can be compared.
+//   node web/record_sample.js OUT.wav BEAT SOUND
+// BEAT 0 off, 1 .. 8 the drum machine's beats (KNOB 4); SOUND 0 the game's own music, 1 .. 3 the synth's sounds
+// (SAW LEAD, ACID, RAVE), 4 .. 131 the game's instruments on every part (PRESETS).
+const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build');
+const [out, beat, sound] = [process.argv[2], ...process.argv.slice(3).map(Number)];
 const BAR = 4 * 8400 / 110, FROM = 4 * BAR, TO = 8 * BAR;                  // ticks of the music (1/140 s) at 110 beats a minute
 globalThis.Module = {
   locateFile: f => path.join(B, f), print: () => {},
   onRuntimeInitialized() {
-    const M = globalThis.Module, PLAY = 1 << 10, SEQ = 1 << 9, ARP = 1 << 8, SAVE = 1 << 7, PRESETS = 2;
+    const M = globalThis.Module, PLAY = 1 << 10, PRESETS = 2, K4 = 6;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const tap = async b => { M._fm1_web_panel(0, b); await sleep(120); M._fm1_web_panel(0, 0); await sleep(120); };
     let tape = null;
     setInterval(() => { const p = M._fm1_web_audio(1024, 44100) >> 1; if (tape) for (let i = 0; i < 2048; i += 2) tape.push(M.HEAP16[p + i]); }, 23);
     (async () => {
       await sleep(1500);                                                    // the title: the settings are made here, before the song
-      for (let i = 0; i < pattern; i++) await tap(SEQ);
-      for (let i = 0; i < (kit - 9 + 13) % 13; i++) await tap(ARP);        // each press the next kit, from CRUNCH (9) round the 13
-      for (let i = 0; i < (3 - level + 5) % 5; i++) await tap(SAVE);        // each press a step quieter, from 3
-      for (let i = 0; i < (4 - dip + 5) % 5; i++) M._fm1_drums_dip_next();  // each a step less, from 4
-      if (chords) M._fm1_fm6_poly(1);
-      if (patch) { M._fm1_web_enc(PRESETS, patch); await sleep(200); }
+      if (beat) { M._fm1_web_enc(K4, beat); await sleep(200); }
+      if (sound) { M._fm1_web_enc(PRESETS, sound); await sleep(200); }
       await tap(PLAY); await sleep(250); await tap(PLAY); await sleep(250); await tap(PLAY);
       for (let i = 0; M._fm1_web_awake() < 0; i++) { if (i > 300) { console.log('no level'); process.exit(1); } await sleep(50); }
       let pos = M._fm1_web_music(8, 0), guard = 0;

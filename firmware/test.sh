@@ -36,5 +36,13 @@ $CC -Wextra -I rp2040-doom/src/fm1 -o $T/filter_test firmware/tests/filter_test.
 run "filter: rp2040-doom/src/fm1/fm1_filter.h" $T/filter_test
 $CC -Wextra -I rp2040-doom/src/fm1 -o $T/osd_test firmware/tests/osd_test.c            # the large message line
 run "message line: rp2040-doom/src/fm1/fm1_osd.h" $T/osd_test
+# the drum machine and the synth (firmware/fm1_sound.c): the synth against Felucca's whole sound core, whose
+# functions of the same names are renamed ref_* for the comparison
+run "sound: firmware/fm1_sound_gen.h is what firmware/gen_sound.c makes from this Felucca" sh tools/gen_sound.sh check
+REF="-Dfm1_fm6_on=ref_on -Dfm1_fm6_count=ref_count -Dfm1_fm6_name=ref_name -Dfm1_fm6_note_on=ref_note_on -Dfm1_fm6_note_off=ref_note_off -Dfm1_fm6_channel_off=ref_channel_off -Dfm1_fm6_mix=ref_mix -Dfm1_fm6_voices=ref_voices -Dfm1_fm6_parts=ref_parts -Dfm1_fm6_chord=ref_chord -Dfm1_fm6_poly=ref_poly"
+${CC:-cc} -O2 -w -IFelucca/build/gen -IFelucca/firmware/src $REF -c firmware/fm1_felucca.c -o $T/ref_felucca.o
+${CC:-cc} -O2 -w -Ifirmware -IFelucca/build/gen -IFelucca/firmware/src -c firmware/fm1_sound.c -o $T/host_sound.o
+${CC:-cc} -O2 -Wall -o $T/synth_test firmware/tests/synth_test.c $T/ref_felucca.o $T/host_sound.o -lm
+run "sound: the synth gives Felucca's own samples; the drum machine's beats (firmware/fm1_sound.c)" $T/synth_test
 [ $fail = 0 ] && echo "ALL DOOM PACKAGE TESTS PASSED" || echo "DOOM PACKAGE TESTS FAILED"
 exit $fail

@@ -1,20 +1,18 @@
-// Headless check of the PROTOTYPE browser build's drum machine (FM6=1 web/build.sh -> web/build-fm6;
-// firmware/fm1_drums.c): SEQ brings in a beat under the song and steps through the patterns, ARP through the
-// kits. With a file name, also records a tour of them on E1M1 as a WAV.
-//   node web/test_drums.js [OUT.wav]
-const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build-fm6');
-const out = process.argv[2];
-// what each pattern strikes in four bars (a crash at the start, a fill at the end where it has one), from the tables
+// Headless check, in the browser build that has what the firmware has (web/build.sh), of the
+// drum machine under the music (firmware/fm1_drums.c): KNOB 4 brings a beat in, off at the bottom; the hits keep
+// to the song; the chip's own percussion is silent meanwhile; the limiter lifts the whole mix and never clips.
+//   node web/test_drums.js
+const path = require('path'), fs = require('fs'), B = path.join(__dirname, 'build');
+// what each beat strikes in four bars (a crash at the start, a fill at the end where it has one), from the tables
 const PATTERNS = [['double bass', 94], ['gallop', 92], ['thrash', 67], ['blast', 97], ['machine gun', 158], ['rock', 55], ['four on the floor', 40], ['half time', 29]];
 const FOUR_BARS = 4 * 4 * 8400 / 110;                                       // ticks of the music (1/140 s) at 110 beats a minute
-const KITS = 13;                                                            // two made here, Felucca's six, five on Felucca's own chain
 globalThis.Module = {
   locateFile: f => path.join(B, f),
   print: s => { if (/Error|error|panic/.test(s)) console.log('[game]', s); },
   onRuntimeInitialized() {
-    const M = globalThis.Module, PLAY = 1 << 10, EDIT = 1 << 4, SEQ = 1 << 9, ARP = 1 << 8, SAVE = 1 << 7, PRESETS = 2, K4 = 6;
+    const M = globalThis.Module, PLAY = 1 << 10, EDIT = 1 << 4, SAVE = 1 << 7, PRESETS = 2, K4 = 6;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
-    let heard = null, speed = 1; const tape = [];
+    let heard = null, speed = 1;
     // the sound is pulled as the page pulls it (1024 frames about every 23 ms), or `speed` times as fast to save time
     setInterval(() => { for (let n = 0; n < speed; n++) { const p = M._fm1_web_audio(1024, 44100) >> 1; if (heard) for (let i = 0; i < 2048; i += 2) heard.push(M.HEAP16[p + i]); } }, 23);
     const tap = async b => { M._fm1_web_panel(0, b); await sleep(150); M._fm1_web_panel(0, 0); await sleep(250); };
@@ -27,96 +25,50 @@ globalThis.Module = {
       const t0 = ticks(), h0 = hits(); let chip = 0;
       while (ticks() - t0 < bars / 4 * FOUR_BARS) { chip += chipDrums(); await sleep(10); }
       speed = 1; return { hits: hits() - h0, ticks: ticks() - t0, chip }; };
-    const listen = async (ms, keep) => { heard = []; await sleep(ms); const a = heard; heard = null; if (keep) for (const v of a) tape.push(v);
+    const listen = async ms => { heard = []; await sleep(ms); const a = heard; heard = null;
       let peak = 0, sq = 0, top = 0; for (const v of a) { peak = Math.max(peak, Math.abs(v)); sq += v * v; top += Math.abs(v) >= 32767; }
       return { rms: Math.sqrt(sq / a.length), peak, top: top / a.length }; };
+    const panel = () => { const p = M._fm1_web_lcd(); return Buffer.from(M.HEAPU8.subarray(p, p + 240 * 240 * 2)); };
     let bad = 0;
     const check = (name, ok, more = '') => { if (!ok) bad++; console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${name}${more ? ': ' + more : ''}`); };
     (async () => {
       // at the title first: the tune there ends on a long note, under which the steps once overran the music's
       // callback queue (10 entries) and the game stopped with a memory fault a little later
       await sleep(1500);
-      for (let i = 0; i < 5; i++) await tap(SEQ);                           // machine gun: a hit on every step
+      await turn(K4, 5);                                                    // machine gun: a hit on every step
       const h0 = hits(); await sleep(9000); const title = hits() - h0;
-      for (let i = 0; i < 5; i++) await tap(SEQ);                           // ... round to off
-      check('a pattern on at the title, through the tune\'s long last note: the drums play to its end (about 5 s) and the game goes on', title > 50, `${title} hits`);
+      await turn(K4, -5);
+      check('a beat on at the title, through the tune\'s long last note: the drums play to its end (about 5 s) and the game goes on', title > 50, `${title} hits`);
       await tap(PLAY); await tap(PLAY); await tap(PLAY); await sleep(3000);
-      const own = await listen(3000, false), before = await count(4);
-      check('before SEQ: the chip plays the song\'s drums, the machine nothing', before.hits === 0 && before.chip > 0, `rms ${own.rms.toFixed(0)}, peak ${own.peak}`);
+      const own = await listen(3000), before = await count(4);
+      check('KNOB 4 at the bottom: the chip plays the song\'s drums, the machine nothing', before.hits === 0 && before.chip > 0, `rms ${own.rms.toFixed(0)}, peak ${own.peak}`);
       for (const [name, want] of PATTERNS) {
-        await tap(SEQ);
-        const c = await count(8);
-        check(`SEQ: ${name}, ${want} hits in four bars of the song, the chip's drums silent`, Math.abs(c.hits - 2 * want) <= 6 && c.chip === 0, `${c.hits} in eight bars (${c.ticks} ticks)`);
+        await turn(K4, 1);
+        const said = M._fm1_web_osd(), c = await count(8);
+        check(`KNOB 4, a click up: ${name}, ${want} hits in four bars of the song, the chip's drums silent, its name on the screen`,
+          Math.abs(c.hits - 2 * want) <= 6 && c.chip === 0 && (said & 255) >= 1 && !(said >> 8), `${c.hits} in eight bars (${c.ticks} ticks)`);
       }
-      await tap(SEQ);
-      const song = await count(8);
-      check('SEQ: the song\'s own drum part on the machine', song.hits > 40 && song.chip === 0, `${song.hits} hits in eight bars`);
-      await tap(SEQ);
-      const off = await count(4);
-      check('SEQ past the last: off, and the chip has its drums back', off.hits === 0 && off.chip > 0);
-      // KNOB 4 picks the beat (there is no tempo knob in this build): off at the bottom, the song's own part at the top
-      await turn(K4, 6); await sleep(300);
-      const rock = await count(4);
-      await turn(K4, 20); await sleep(300);
+      await turn(K4, 5);
       const top = await count(4);
-      await turn(K4, -20); await sleep(300);
-      const none = await count(4);
-      check('KNOB 4 picks the beat: six clicks up is rock, the top is the song\'s own part, the bottom is off', Math.abs(rock.hits - 55) <= 4 && top.hits > 20 && top.chip === 0 && none.hits === 0 && none.chip > 0 && Math.abs(none.ticks - 1222) < 40,
-        `${rock.hits} hits, ${top.hits} hits, ${none.hits} hits; four bars are ${none.ticks} ticks`);
-      await turn(K4, 1);                                                    // double bass again
-      for (let i = 0; i < 4; i++) await tap(ARP);                           // the kit to begin with is CRUNCH (10 of 13): on to METAL, the first
-      for (let k = 1; k < KITS; k++) {
-        await tap(ARP);
-        const c = await count(4), l = await listen(1500, false);
-        check(`ARP: kit ${k + 1} of ${KITS} plays the same pattern`, Math.abs(c.hits - 94) <= 6 && l.rms > 300, `${c.hits} hits; rms ${l.rms.toFixed(0)}, peak ${l.peak}`);
-      }
-      // the last five kits go through Felucca's master limiter with the music, which goes in at twice its level
-      await sleep(1500);
-      const slam = await listen(5000, false);
-      check('a kit on the limiter (the last): the whole mix louder than twice the music alone, and no flat tops', slam.rms > own.rms * 2 && slam.top < 0.0005, `rms ${slam.rms.toFixed(0)} against ${own.rms.toFixed(0)}, peak ${slam.peak}`);
-      const pushes = [0, 1, 2, 3, 4].map(() => M._fm1_drums_dip_next());    // (the M key there: how hard the music goes in; round to where it was)
-      for (let i = 0; i < 9; i++) await tap(SEQ);                           // the patterns round to off
-      await sleep(500);
-      const rest = await listen(3000, false);
-      check('... and with the drums off, the music is back at its own level', pushes.join() === '2,1,0,4,3' && rest.rms > own.rms * 0.4 && rest.rms < own.rms * 1.7, `rms ${rest.rms.toFixed(0)} against ${own.rms.toFixed(0)}`);
-      await tap(SEQ);                                                       // double bass again
-      await tap(ARP);                                                       // the metal kit again
+      check('KNOB 4 past the top stays on the last beat', Math.abs(top.hits - 29) <= 4, `${top.hits} hits in four bars`);
+      await turn(K4, -7);                                                   // double bass
       await sleep(1500);                                                    // (the fast counting above starved the sound: let it settle)
       const under = M._fm1_web_underruns();
-      const loud = await listen(6000, false);
-      check('the metal kit over the music: well above the music alone, and no flat tops', loud.rms > own.rms * 1.5 && loud.rms < own.rms * 6 && loud.top < 0.0005, `rms ${loud.rms.toFixed(0)} against ${own.rms.toFixed(0)}, peak ${loud.peak}`);
-      const levels = [loud.rms];
-      for (let i = 0; i < 4; i++) { await tap(SAVE); levels.push((await listen(2500, false)).rms); }   // 2, 1, 5, 4 of 5
-      await tap(SAVE);                                                      // the middle again
-      check('SAVE: five loudnesses against the music, quieter twice, then round to the loudest', levels[1] < levels[0] && levels[2] < levels[1] && levels[3] > levels[0] && levels[4] < levels[3] && levels[4] > levels[0],
-        levels.map(v => v.toFixed(0)).join(', '));
-      const dips = [0, 1, 2, 3, 4].map(() => M._fm1_drums_dip_next());
-      check('the page\'s M key: the music dips a step less each time (4 of 5 at the start), then round to the most', dips.join() === '2,1,0,4,3', dips.map(d => d + 1).join(', '));
+      const loud = await listen(6000);
+      check('double bass over the music: the whole mix through the limiter, louder than twice the music alone, and no flat tops', loud.rms > own.rms * 2 && loud.rms < own.rms * 7 && loud.top < 0.0005,
+        `rms ${loud.rms.toFixed(0)} against ${own.rms.toFixed(0)}, peak ${loud.peak}`);
       check('no audio underruns while listening at the game\'s own speed', M._fm1_web_underruns() === under, `${M._fm1_web_underruns() - under}`);
-      await turn(PRESETS, 3); await sleep(1500);                            // ... with Felucca's FM engine on the melody too
+      await turn(PRESETS, 3); await sleep(1500);                            // ... with RAVE on the melody too
       const all = await count(4);
-      check('with Felucca\'s FM engine on the melody as well: both play', Math.abs(all.hits - 94) <= 6 && M._fm1_fm6_voices() > 0);
+      check('with the synth on the melody as well: both play', Math.abs(all.hits - 94) <= 6 && M._fm1_fm6_voices() > 0, `${all.hits} hits, ${M._fm1_fm6_voices()} lines sounding`);
+      const dark = panel(); await tap(SAVE); await sleep(600); const lit = panel();
+      let changed = 0; for (let y = 0; y < 12; y++) for (let x = 2 * 216; x < 480; x++) changed += dark[y * 480 + x] !== lit[y * 480 + x];
+      await tap(SAVE);
+      check('SAVE puts the engine\'s frames-a-second count in the picture\'s top right corner', changed > 20, `${changed} bytes of that corner changed`);
       await tap(EDIT); await sleep(1500);
-      const back = await count(4);
-      check('EDIT: the drums stop and the game\'s own music is back', back.hits === 0 && back.chip > 0 && M._fm1_fm6_voices() === 0);
-      if (out) {                                                            // a tour, in real time
-        const say = [];
-        const part = async (what, ms) => { say.push(`${what} ${Math.round(tape.length / 44100)} s`); await listen(ms, true); };
-        await part('the game\'s own', 5000);
-        await tap(SEQ); await part('double bass (metal kit)', 10000);
-        await tap(SEQ); await part('gallop', 9000);
-        await tap(SEQ); await part('thrash', 9000);
-        await tap(SEQ); await part('blast', 8000);
-        await tap(SEQ); await part('machine gun', 8000);
-        await tap(SEQ); await tap(ARP); await part('rock (punch kit)', 9000);
-        await tap(SEQ); await part('four on the floor (punch kit)', 8000);
-        await tap(SEQ); await tap(SEQ); for (let k = 1; k < KITS; k++) await tap(ARP); await part('the song\'s own part (metal kit)', 9000);
-        const pcm = Buffer.alloc(tape.length * 2); tape.forEach((v, i) => pcm.writeInt16LE(v, i * 2));
-        const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20);
-        h.writeUInt16LE(1, 22); h.writeUInt32LE(44100, 24); h.writeUInt32LE(88200, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
-        fs.writeFileSync(out, Buffer.concat([h, pcm]));
-        console.log(`  wrote ${out}: ${(tape.length / 44100).toFixed(0)} s: ${say.join(', ')}`);
-      }
+      const back = await count(4), rest = await listen(3000);
+      check('EDIT: the drums stop, the game\'s own music is back and at its own level', back.hits === 0 && back.chip > 0 && M._fm1_fm6_voices() === 0 && rest.rms > own.rms * 0.4 && rest.rms < own.rms * 1.7,
+        `rms ${rest.rms.toFixed(0)} against ${own.rms.toFixed(0)}`);
       console.log(bad ? `THE DRUM MACHINE IN THE GAME: FAILED (${bad})` : 'THE DRUM MACHINE IN THE GAME: PASSED');
       process.exit(bad ? 1 : 0);
     })();

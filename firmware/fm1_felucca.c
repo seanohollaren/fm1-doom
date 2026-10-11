@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* FM-1 Doom, PROTOTYPE (browser build only): the game's music played by Felucca's synth, whole.
+/* FM-1 Doom: the game's music played by Felucca's synth, whole. NOT IN ANY BUILD since b15: it is what the
+ * firmware's own synth (fm1_synth.c: three of these sounds, cut to fit) is tested against, sample for sample
+ * (firmware/tests/synth_test.c). It was the browser prototype in which Sean chose those sounds by ear.
  *
  * The first prototype (fm1_fm6.c, replaced by this file) had one of Felucca's engines, FM6, dry. What Sean hears
  * on the FM-1 under Felucca is more than that: twelve engines with about seventy factory presets, and every
