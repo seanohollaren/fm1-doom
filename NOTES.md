@@ -1602,3 +1602,28 @@ Sean asked what else a spare knob could do to the sound; of the ideas he picked 
 - NOT VERIFIED until it runs on the FM-1: how drive sounds on the speaker and whether 4 dB at the top is too
   much or too little; whether KNOB 3 and PRESETS are the encoders the HAL's numbering says; the frame rate with
   drive and filter both on; whether some instruments are too quiet to be worth stopping on.
+
+## 2026-10-10 — Do b8 and b9 raise the risk of a brick? (Sean's question; answered on the Mac)
+
+- New: `tools/core_diff.py OLD_DIR NEW_DIR` compares the recovery core of two builds (start-up code, vectors,
+  interrupt stubs, `doom_dev.o` with the Felucca sources in it) function by function, as instruction text with
+  link addresses masked. Reads `doom.map` and `doom.dis` only.
+- VERIFIED, b7 (`installed_2ab6deb5`) against b9 (`installed_ef6a2897`): of b7's 70 recovery-core functions, 57
+  are the same instructions; 10 more are the same instructions with their variables 16 bytes further on (the
+  drive's 16 bytes of state), among them `fm1_cstart` (boot, the choice of safe mode, the safe-mode loop),
+  `dev_service` (watchdog, boot guard, the boot-mode chord), `usb_start`, `fm1_timer5_irq` and the update
+  protocol's functions; `fm1_lcd_speed_next` is gone; two have different code: `fm1_alnk0_irq` (the audio
+  interrupt, which now runs the drive) and `fm1_lcd_blit` (the game's picture, always at the fastest rate).
+- VERIFIED in the source: both of those run in game mode only. The audio interrupt is attached inside
+  `if (dev_mode == MODE_GAME)`; `fm1_lcd_blit` is called only from the game's video code. Safe mode never
+  reaches either. The drive is off at power-on, so its loop does not run until KNOB 3 is turned.
+- So the worst a fault in the new code can do is stop or spoil the game while it runs: the watchdog or the
+  fault handler restarts it, a start that dies in its first 30 s comes back in safe mode (amber), and HOME held
+  at switch-on gives safe mode (cyan) before any game code runs. The ladder below that is unchanged and was
+  not touched: three failed starts or three minutes unheard in safe mode lead to the chip's boot mode, where
+  `fm1restore.py` writes the backup (read and sector write VERIFIED on the device 2026-10-09; a whole restore
+  has never been needed, so never run).
+- What stays as it always was: an install rewrites the whole application area, recovery core included, through
+  Felucca's loader. That risk belongs to every install (b5, b6, b7 too), not to these features.
+- ASSUMED, not said by Sean: that b7 has run on his FM-1. The comparison is against b7 because it is the build
+  on `main`; if he last ran another build, the same check against that build's `installed_*` directory applies.
