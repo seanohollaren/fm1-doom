@@ -27,6 +27,6 @@ for f in $FILES; do
 done
 [ $fail = 0 ] || exit 1
 touch $STAMP
-emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
+emcc -O2 --profiling-funcs -Wl,-Map=$OUT/doom.map $OBJS -o $OUT/doom.js -sINITIAL_MEMORY=33554432 -sSTACK_SIZE=1048576 -sEXPORTED_FUNCTIONS=_main,_fm1_web_panel,_fm1_web_enc,_fm1_web_underruns,_fm1_web_exit_level,_fm1_web_dump,_fm1_web_split_at,_fm1_web_warp,_fm1_web_awake,_fm1_web_lcd,_fm1_web_frames,_fm1_web_audio,_fm1_web_music,_fm1_web_osd -sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP16
 cp web/index.html $OUT/
 echo "web: $OUT ($(wc -c < $OUT/doom.wasm | tr -d ' ') B wasm)"

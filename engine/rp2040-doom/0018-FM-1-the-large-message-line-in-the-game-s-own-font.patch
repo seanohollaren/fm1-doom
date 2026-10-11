@@ -1,0 +1,329 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sat, 10 Oct 2026 21:31:01 -0700
+Subject: [PATCH] FM-1: the large message line in the game's own font
+
+The plain capitals drawn for it were readable but not the game's. The line is now written in the
+font the game uses for its own messages (the STCFN patches), a row at a time through draw_vpatch
+into a row of its own, each of the font's pixels as 2 x 2 on the panel, straight onto the picture
+with no band behind it, from the top left as the game's messages are. fm1_osd.h breaks a message
+into up to three lines by the letters' widths.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_osd.h   | 163 ++++++++++----------------------------------
+ src/fm1/fm1_video.c |  69 +++++++++++++++++--
+ src/fm1/fm1_web.c   |   4 ++
+ 3 files changed, 105 insertions(+), 131 deletions(-)
+
+diff --git a/src/fm1/fm1_osd.h b/src/fm1/fm1_osd.h
+index ebdd7e1..482ba5d 100644
+--- a/src/fm1/fm1_osd.h
++++ b/src/fm1/fm1_osd.h
+@@ -1,121 +1,64 @@
+-// FM-1: the message line, drawn large. What a knob or button has just done ("LOW PASS 955 HZ",
+-// "MUSIC 20 CHURCH ORGAN") is written across the top of the picture at the panel's own resolution, about twice the
+-// size of the game's own message font as the panel shows it: capitals 5 dots by 7, each dot 2 by 2 pixels, in
+-// lines of 20 characters on a darkened band, for three seconds. fm1_video.c draws it into each panel row as it
+-// goes out; fm1_controls.c says what to write. The game's own messages ("PICKED UP A CLIP") are not touched.
+-// The letters were drawn for this file. firmware/tests/osd_test.c in the fm1-doom repository tests it on a PC.
++// FM-1: the message line, in the game's own letters at twice their size.
++//
++// What a knob or button has just done ("LOW PASS 955 HZ", "MUSIC 20 CHURCH ORGAN") is written across the top of
++// the picture for three seconds, in the font the game writes its own messages in, each of the font's pixels as
++// 2 x 2 pixels of the panel. (The game's own messages are squeezed 4 to 3 with the rest of the picture, so these
++// come out about twice as tall and nearly three times as wide.) This file breaks a message into lines by the
++// letters' widths and keeps the time; fm1_video.c, which has the font and the panel rows, draws it;
++// fm1_controls.c says what to write. firmware/tests/osd_test.c in the fm1-doom repository tests it on a PC.
+ //
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ #pragma once
+ #include <stdint.h>
+ 
+-#define FM1_OSD_COLS 20                 // characters a line
+ #define FM1_OSD_LINES 3
+-#define FM1_OSD_CELL_W 12               // a character's pixels: 5 dots and a gap, twice over
+-#define FM1_OSD_LINE_H 18               // 7 dots twice over, and 4 pixels to the next line
+-#define FM1_OSD_PAD 4                   // band above the first line and below the last
++#define FM1_OSD_LINE_CHARS 31           // the most characters a line can hold
++#define FM1_OSD_WIDTH 116               // a line, in the font's own pixels (232 of the panel's 240)
++#define FM1_OSD_SPACE 4                 // a space, as the game's own lines have it
++#define FM1_OSD_ROWS 8                  // the tallest letter, in the font's rows
++#define FM1_OSD_PITCH 9                 // font rows from one line to the next
+ #define FM1_OSD_MS 3000u                // how long a message stays
+ 
+-// the dots of characters 32 (space) to 95, seven rows each, the leftmost dot in bit 4
+-static const uint8_t FM1_OSD_FONT[64][7] = {
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   //  
+-    {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04},   // !
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // "
+-    {0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A},   // #
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // $
+-    {0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03},   // %
+-    {0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D},   // &
+-    {0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00},   // '
+-    {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02},   // (
+-    {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08},   // )
+-    {0x00, 0x15, 0x0E, 0x1F, 0x0E, 0x15, 0x00},   // *
+-    {0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00},   // +
+-    {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08},   // ,
+-    {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00},   // -
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},   // .
+-    {0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10},   // /
+-    {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},   // 0
+-    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},   // 1
+-    {0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F},   // 2
+-    {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E},   // 3
+-    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},   // 4
+-    {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},   // 5
+-    {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},   // 6
+-    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},   // 7
+-    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},   // 8
+-    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},   // 9
+-    {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00},   // :
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ;
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // <
+-    {0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00},   // =
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // >
+-    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04},   // ?
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // @
+-    {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},   // A
+-    {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},   // B
+-    {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E},   // C
+-    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E},   // D
+-    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},   // E
+-    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},   // F
+-    {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F},   // G
+-    {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},   // H
+-    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},   // I
+-    {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C},   // J
+-    {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},   // K
+-    {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},   // L
+-    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11},   // M
+-    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11},   // N
+-    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},   // O
+-    {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},   // P
+-    {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D},   // Q
+-    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},   // R
+-    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},   // S
+-    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},   // T
+-    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},   // U
+-    {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04},   // V
+-    {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11},   // W
+-    {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},   // X
+-    {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},   // Y
+-    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},   // Z
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // [
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // backslash
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ]
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // ^
+-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // _
+-};
+-
+ typedef struct {
+-    char text[FM1_OSD_LINES][FM1_OSD_COLS + 1];
++    char text[FM1_OSD_LINES][FM1_OSD_LINE_CHARS + 1];
+     uint8_t lines;                      // 0: nothing to show
++    uint8_t clipped;                    // not all of the message fitted (a word wider than a line, or too many lines)
+     uint32_t until;                     // on the millisecond clock
+ } fm1_osd_t;
+ 
+-// Take a message: capitals, broken into lines at its spaces (a word longer than a line is cut; what does not fit
+-// in the lines there are is dropped).
+-static void fm1_osd_set(fm1_osd_t *o, const char *s, uint32_t now)
++// Take a message: capitals, broken into lines at its spaces, by the width in font pixels that `width` gives
++// for each character. A word wider than a line is left to run off the end of its own line; what does not fit in
++// the lines there are is dropped.
++static void fm1_osd_set(fm1_osd_t *o, const char *s, uint32_t now, int (*width)(int c))
+ {
+-    int line = 0, col = 0;
++    int line = 0, col = 0, x = 0;
++    o->clipped = 0;
+     while (*s == ' ')
+         s++;
+     while (*s && line < FM1_OSD_LINES) {
+-        int n = 0, i;
+-        while (s[n] && s[n] != ' ')
+-            n++;
+-        if (col && col + 1 + n > FM1_OSD_COLS) {            // the word goes on the next line
+-            o->text[line++][col] = 0;
+-            col = 0;
++        int n = 0, w = 0, i;
++        for (; s[n] && s[n] != ' '; n++)
++            w += width(s[n] >= 'a' && s[n] <= 'z' ? s[n] - 32 : s[n]);
++        if (col && (x + FM1_OSD_SPACE + w > FM1_OSD_WIDTH || col + 1 + n > FM1_OSD_LINE_CHARS)) {
++            o->text[line++][col] = 0;       // the word goes on the next line
++            col = x = 0;
+             continue;
+         }
+-        if (col)
++        if (col) {
+             o->text[line][col++] = ' ';
+-        for (i = 0; i < n && col < FM1_OSD_COLS; i++) {
+-            char c = s[i];
+-            o->text[line][col++] = (char)(c >= 'a' && c <= 'z' ? c - 32 : c);
++            x += FM1_OSD_SPACE;
+         }
++        for (i = 0; i < n && col < FM1_OSD_LINE_CHARS; i++)
++            o->text[line][col++] = (char)(s[i] >= 'a' && s[i] <= 'z' ? s[i] - 32 : s[i]);
++        x += w;
++        if (x > FM1_OSD_WIDTH || i < n)
++            o->clipped = 1;
+         s += n;
+         while (*s == ' ')
+             s++;
+     }
++    if (*s)
++        o->clipped = 1;
+     if (line < FM1_OSD_LINES)
+         o->text[line++][col] = 0;
+     o->lines = (uint8_t)(col || line > 1 ? line : 0);
+@@ -123,37 +66,3 @@ static void fm1_osd_set(fm1_osd_t *o, const char *s, uint32_t now)
+ }
+ 
+ static inline int fm1_osd_on(const fm1_osd_t *o, uint32_t now) { return o->lines && (int32_t)(o->until - now) > 0; }
+-// how many panel rows the band takes from its top
+-static inline int fm1_osd_height(const fm1_osd_t *o) { return 2 * FM1_OSD_PAD + o->lines * FM1_OSD_LINE_H - 4; }
+-
+-// One panel row of `width` pixels (RGB565 with its two bytes swapped, as the panel takes them), `y` rows below
+-// the top of the band: the picture is dimmed to a quarter, and the row's dots are written in white.
+-static void fm1_osd_row(const fm1_osd_t *o, uint16_t *px, int width, int y)
+-{
+-    int i, r, line, dot;
+-    const char *t;
+-    if (y < 0 || y >= fm1_osd_height(o))
+-        return;
+-    for (i = 0; i < width; i++) {
+-        uint16_t v = (uint16_t)(px[i] << 8 | px[i] >> 8);
+-        v = (uint16_t)((v >> 2) & 0x39E7u);
+-        px[i] = (uint16_t)(v << 8 | v >> 8);
+-    }
+-    r = y - FM1_OSD_PAD;
+-    if (r < 0)
+-        return;
+-    line = r / FM1_OSD_LINE_H;
+-    dot = r % FM1_OSD_LINE_H / 2;
+-    if (line >= o->lines || dot >= 7)
+-        return;
+-    t = o->text[line];
+-    for (i = 0; t[i]; i++)
+-        ;
+-    px += (width - (i * FM1_OSD_CELL_W - 2)) / 2;           // the line centred
+-    for (; *t; t++, px += FM1_OSD_CELL_W) {
+-        unsigned c = (unsigned char)*t - 32u, bits = c < 64u ? FM1_OSD_FONT[c][dot] : 0u;
+-        for (i = 0; bits; i += 2, bits = (bits << 1) & 0x1Fu)
+-            if (bits & 0x10u)
+-                px[i] = px[i + 1] = 0xFFFFu;
+-    }
+-}
+diff --git a/src/fm1/fm1_video.c b/src/fm1/fm1_video.c
+index 719d38a..7c1fb72 100644
+--- a/src/fm1/fm1_video.c
++++ b/src/fm1/fm1_video.c
+@@ -610,11 +610,70 @@ void fm1_view_next(void)
+ }
+ const char *fm1_view_name(void) { return FM1_VIEW_NAMES[fm1_view]; }
+ 
+-// what a knob or button has just done, written large across the top of the picture (fm1_osd.h)
++// What a knob or button has just done, written across the top of the picture in the game's own message font at
++// twice its size (fm1_osd.h breaks it into lines). The letters are the font's patches, STCFN033 ('!') to
++// STCFN095 ('_'), drawn by draw_vpatch as the game's own text is, but a row at a time into a row of their own,
++// which then goes onto two panel rows with every pixel doubled.
+ #include "fm1_osd.h"
+-#define FM1_OSD_TOP 4                      /* panel rows from the top of the picture to the band */
++#define FM1_OSD_TOP 4                      /* panel rows from the top of the picture to the first line */
++#define FM1_OSD_LEFT 4                     /* ... and pixels from its left edge */
++#define FM1_OSD_CLEAR 0x07E1u              /* marks a pixel no letter covers (a green the font's reds never are) */
+ static fm1_osd_t fm1_osd;
+-void fm1_osd_say(const char *text) { fm1_osd_set(&fm1_osd, text, fm1_millis()); }
++static uint16_t fm1_osd_doff[FM1_OSD_LINES][FM1_OSD_LINE_CHARS];   /* how far into each letter's data this frame has got */
++static uint16_t fm1_osd_px[FM1_OSD_WIDTH + 32];                    /* one row of one line, in the font's own pixels */
++
++static patch_t *fm1_osd_letter(int c)      /* NULL: a space, or nothing the font has */
++{
++    return c >= '!' && c <= '_' ? resolve_vpatch_handle(vpatch_n(VPATCH_STCFN033, c - '!')) : NULL;
++}
++static int fm1_osd_width(int c)
++{
++    patch_t *patch = fm1_osd_letter(c);
++    return patch ? vpatch_width(patch) : FM1_OSD_SPACE;
++}
++void fm1_osd_say(const char *text) { fm1_osd_set(&fm1_osd, text, fm1_millis(), fm1_osd_width); }
++
++// One panel row (pixels with their bytes swapped, as the panel takes them), y rows below the top of the first
++// line. Rows must come in order, top to bottom, each once a frame: a letter's data is read a row at a time.
++static void fm1_osd_row(uint16_t *row, int y)
++{
++    int line, r, x, i;
++    if (y < 0)
++        return;
++    line = y / (2 * FM1_OSD_PITCH);
++    r = y % (2 * FM1_OSD_PITCH);
++    if (line >= fm1_osd.lines || r >= 2 * FM1_OSD_ROWS)
++        return;
++    if (!(r & 1)) {                        /* a new row of the font: drawn once, shown on this panel row and the next */
++        const char *t = fm1_osd.text[line];
++        for (x = 0; x < FM1_OSD_WIDTH + 32; x++)
++            fm1_osd_px[x] = FM1_OSD_CLEAR;
++        for (i = 0, x = 0; t[i] && x < FM1_OSD_WIDTH; i++) {
++            patch_t *patch = fm1_osd_letter(t[i]);
++            if (!patch) {
++                x += FM1_OSD_SPACE;
++                continue;
++            }
++            if ((r >> 1) < vpatch_height(patch) && vpatch_width(patch) <= 32) {
++                vpatchlist_t vp;
++                memset(&vp, 0, sizeof vp);
++                vp.entry.x = (uint32_t)x;
++                fm1_osd_doff[line][i] = (uint16_t)draw_vpatch(fm1_osd_px, patch, &vp, fm1_osd_doff[line][i]);
++            }
++            x += vpatch_width(patch);
++        }
++    }
++    row += FM1_OSD_LEFT;
++    for (x = 0; x < FM1_OSD_WIDTH; x++) {
++        uint16_t v = fm1_osd_px[x];
++        if (v != FM1_OSD_CLEAR)
++            row[2 * x] = row[2 * x + 1] = (uint16_t)(v << 8 | v >> 8);
++    }
++}
++#if FM1_WEB
++// (browser build, test hook) the message showing now: its lines, plus 256 if not all of it fitted; 0 for none
++int fm1_osd_probe(void) { return fm1_osd_on(&fm1_osd, fm1_millis()) ? fm1_osd.lines + 256 * fm1_osd.clipped : 0; }
++#endif
+ 
+ static uint32_t fm1_line[SCREENWIDTH / 2 + 2];             /* one composed scanline, RGB565 (word aligned) */
+ // two strip buffers, used in turn: the platform may still be sending one (DMA) while the next is composed.
+@@ -637,6 +696,8 @@ void fm1_present(void) {
+     int out_y = 0, n = 0, acc = 0;
+     const int rows = FM1_VIEW_ROWS[fm1_view], view_y = (FM1_LCD_H - rows) / 2;
+     const int osd = fm1_osd_on(&fm1_osd, fm1_millis());
++    if (osd)
++        memset(fm1_osd_doff, 0, sizeof fm1_osd_doff);       /* every letter from its first row */
+     uint16_t *fm1_strip = fm1_strips[fm1_strip_i];
+     fm1_alive();
+     fm1_audio_pump();
+@@ -684,7 +745,7 @@ void fm1_present(void) {
+         for (acc += rows; acc >= SCREENHEIGHT; acc -= SCREENHEIGHT) {
+             fm1_squeeze(fm1_strip + n * FM1_LCD_W, dest);
+             if (osd)
+-                fm1_osd_row(&fm1_osd, fm1_strip + n * FM1_LCD_W, FM1_LCD_W, out_y + n - FM1_OSD_TOP);
++                fm1_osd_row(fm1_strip + n * FM1_LCD_W, out_y + n - FM1_OSD_TOP);
+             if (++n == FM1_STRIP_H) {
+                 fm1_lcd_blit(0, (unsigned)(view_y + out_y), FM1_LCD_W, (unsigned)n, fm1_strip);
+                 fm1_strip = fm1_strips[fm1_strip_i ^= 1];
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index 3af2e17..564fc52 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -84,6 +84,10 @@ EMSCRIPTEN_KEEPALIVE int16_t *fm1_web_audio(int frames, int rate)
+ int fm1_music_probe(int what, int i);
+ EMSCRIPTEN_KEEPALIVE int fm1_web_music(int what, int i) { return fm1_music_probe(what, i); }
+ 
++// test hook: the large message line (fm1_video.c fm1_osd_probe)
++int fm1_osd_probe(void);
++EMSCRIPTEN_KEEPALIVE int fm1_web_osd(void) { return fm1_osd_probe(); }
++
+ // test hook: finish the level as the exit switch would (the page's console: Module._fm1_web_exit_level())
+ void G_ExitLevel(void);
+ EMSCRIPTEN_KEEPALIVE void fm1_web_exit_level(void) { G_ExitLevel(); }

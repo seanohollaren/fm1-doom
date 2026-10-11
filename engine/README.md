@@ -1,7 +1,7 @@
 # The engine source
 
 The game engine is [rp2040-doom](https://github.com/kilograham/rp2040-doom) by Graham Sanderson (itself built on
-Chocolate Doom), with the FM-1 work on top of it. That work is the patch series in `rp2040-doom/`: seventeen commits
+Chocolate Doom), with the FM-1 work on top of it. That work is the patch series in `rp2040-doom/`: eighteen commits
 against upstream commit `29a453c` (branch `rp2`, 2024-08-11), exported with `git format-patch`.
 
 ```bash
