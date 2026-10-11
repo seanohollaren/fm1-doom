@@ -2014,3 +2014,79 @@ Gurvich).
   the retired four-operator engine, PHASE 6, LOFI 5, VOICE 4, TRIO 5, WHEEL 5, GRAIN 4, PHYS 9, NOISE 4, DRUM,
   and SAMPLE's recorded sounds), and every preset also sets chorus, delay and reverb sends, which the prototype
   does not have. So the sounds he likes on the device are most likely another engine's. Open: which ones.
+
+## 2026-10-11 — Felucca's whole synth under the music, with its effects (browser build only); Sean's picks
+
+- Sean, after the list of Felucca's presets: he is interested in RAVE, and thinks what he was missing in the
+  first prototype is the chorus, delay and reverb the presets set. Both were right to chase: the first
+  prototype (`firmware/fm1_fm6.c`, now removed; last in commit 7099f2e) had one engine of twelve, dry.
+- **Built:** `firmware/fm1_felucca.c`: Felucca's sound core as its own host tests build it (`tests/hostsim.c`:
+  libc, engines, voices, effects, sequencer in one compilation unit), with the music's melodic notes played on
+  it. PRESETS 1 to 66 are its factory presets in the order of its own PRESETS knob (ANALOG 12, FM6 8, PHASE 6,
+  LOFI 5, SAMPLE 4, VOICE 4, TRIO 5, WHEEL 5, GRAIN 4, PHYS 9, NOISE 4; DRUM and SLICE left out), then the
+  game's 128. A preset is set as Felucca's knob sets it: engine, eight values, envelope, mono or poly, the four
+  sends (distortion, chorus, delay, reverb). The delay follows the song's tempo. Notes are queued with their
+  place in the mixer's pass, as the drum hits are.
+- Felucca is four parts sharing eight voices. Each of the music's channels gets a part (E1M1 uses three), all
+  on the same preset, so the 14 presets Felucca plays one note at a time (RAVE among them) keep each line.
+  MEASURED on E1M1: a channel holds up to two notes at once, so those presets thin its chords; the recorder
+  can force chords (`fm1_fm6_poly`), and the page has RAVE both ways.
+- Level: Felucca's output (its own limiter keeps it near 18,000) goes into the game's mix at 96/256. MEASURED on
+  the takes: RAVE 2,527 RMS against the game's own 2,204 (of which 1,431 is the chip's offset, so about 3.5 dB
+  more sound); the presets range from 700 (plucked PHYS sounds) to 2,970.
+- VERIFIED headless: `node web/test_felucca.js` (7 checks): all 66 play the melody with the chip only on
+  drums, nothing clipped, every name fits the screen; RAVE uses three parts; PRESETS 67 is the chip again; the
+  pitch knob and EDIT work; no underruns. `node web/test_drums.js` passes with it (34 checks).
+- The wasm grew from 1,080 KB to 1,348 KB. SAMPLE's second preset is the first again (a retired set's alias).
+- **Review page, version 3:** a new first section: RAVE (as Felucca plays it, and with chords), RAVE over the
+  CRUNCH drums, and every preset by engine: 69 new takes, 142 in all, recorded eight at a time (3 min 43 s; the
+  recorder's underrun count stayed at its start-up value on every take).
+- **Sean's verdict by ear (2026-10-11):** "Oh yeah this is awesome. Saw Lead, Rave, Acid, Pulse Lo all sound
+  awesome." That is ANALOG SAW LEAD, RAVE and ACID, and LOFI PULSE LD: two engines, all four one-note presets.
+- **KNOB 4 is the drum selector** (his request: "I don't like the tempo control anyway"). In the prototype
+  (`FM1_DRUMS`) KNOB 4 on the first page picks the beat, off at the bottom, and there is no tempo knob; the kit
+  the machine starts on is CRUNCH (his pick), level 3, push 4. Engine patch 0026. The device build (b14) is
+  unchanged and still has the tempo knob: it changes when a device build has the drums.
+
+## 2026-10-11 — What could ship: first figures for the drums and the four sounds on the device (desk work)
+
+Sean: "I'd like to start moving toward finding out what's actually feasible to ship in the firmware."
+Nothing here ran on the device. Sizes are MEASURED with the device's compiler (`firmware/build/probe/run.sh`:
+the JieLi pi32v2 clang at the firmware's own flags on `fm1_drums.c` and `fm1_felucca.c`, sizes from the
+objects' symbol tables); processor shares are ESTIMATES from Felucca's own figures.
+
+- **What there is to spend** (VERIFIED earlier): flash, 15.7 KB spare in block 1 of the app slot at b14; RAM,
+  the large-buffer region is full (12 B) and the other holds the game's heap, 233 KB, which the browser build
+  has run in 200 KB (not measured: how much of it E1M1 really uses); processor, unknown: no frame rate has
+  been measured on the FM-1 yet.
+- **The drum machine as the prototype has it** (13 kits, all voices): code 12,990 B + constants 6,524 B =
+  19.5 KB of flash, 2.2 KB of RAM. Too big as it is. Where it goes: 5.7 KB is setting a voice up from a kit's
+  knobs (Felucca's `dv_setup` for all twelve voice kinds, inlined), 3.4 KB the voices themselves, 2.7 KB the
+  mix with the chain, 2.05 KB the sine table, 1.4 KB Felucca's model kits, 0.8 KB my kit table, 0.8 KB the
+  pitch table. A cut for the device: the CRUNCH kit only, the five voices its patterns use (kick, snare, hat,
+  cymbal, tom), their settings worked out at build time (no set-up code, no pitch table), the chain: about
+  9 KB of flash, 1.5 KB of RAM. ESTIMATE until it is built.
+- **Felucca's synth whole:** code 71 KB, constants 157 KB (126 KB of it the recorded instruments), RAM 315 KB.
+  Not a candidate; it was never meant to be.
+- **The four sounds, cut to fit:** as Felucca compiles them, `analog_render` 1.7 KB and `lofi_render` 0.9 KB;
+  one-note voices with glide about 1.3 KB (no chord allocation is needed: all four are one-note presets);
+  envelope, LFO and filter control about 1 KB with 1 KB of tables; distortion 0.3 KB; chorus, delay and reverb
+  0.9 KB; the limiter is the drums'; pitch and filter tables 1 KB; glue 1 KB. About 9 KB of flash, of which
+  PULSE LD's engine is 1.2 KB. ESTIMATE until it is built.
+- **So in flash:** the drums alone fit (about 9 of 15.7 KB), the sounds alone fit, both together come to about
+  18 KB: 2 to 3 KB over, by estimate. Room to find: PULSE LD's engine (1.2 KB), a quarter sine table (1 KB),
+  the tempo knob and what else the firmware can lose.
+- **In RAM** the effects are the cost: Felucca's delay line is 131 KB (1.49 s); an eighth at 110 beats a
+  minute needs 24 KB at 44.1 kHz, 12 KB at half that rate; the reverb 10 KB of combs plus its allpasses; the
+  chorus 4 KB. With voices and the drums about 30 KB, all of it out of the game's heap (13 % of it). Each
+  effect can be dropped on its own, so which of the three the sounds need is a question for Sean's ear.
+- **Processor** (Felucca's host counts, `tests/cpu_baseline.txt`, at its measured 1.7 % of the chip per 100
+  instructions a sample; ASSUMED to carry over): a RAVE voice about 2.5 %, SAW LEAD 1.9 %, ACID 2.0 %, PULSE LD
+  0.9 % (each with a share of the effects in it); three lines of RAVE with effects about 10 %; the drums 4.5 %
+  as Felucca's kit, about 6 % with the chain (the limiter divides once a sample). About 16 % together. Against
+  that, with both on the emulated chip has nothing left to play and need not run; what it costs now is not
+  measured. Only a build on the device with a load meter settles this.
+- **The path:** (1) on the Mac: the device-shaped cuts built into the browser prototype in place of whole
+  Felucca, compared by ear with the takes Sean liked, and linked into the real firmware for exact sizes, with
+  the heap's real use measured; (2) on the device: a test build with a frame-rate and audio-load readout, which
+  Sean installs; the recovery core compared as before every build; (3) what ships, and the controls for it.
