@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 09:50:23 -0700
+Subject: [PATCH] FM-1: the drum machine prototype's steps are thirty-seconds
+ over four bars; SAVE sets its loudness
+
+The patterns now have double bass, fills and a crash every fourth bar, so a step is a
+thirty-second counted through four bars (0 .. 127), and only steps with a hit get a timer.
+Still under FM1_DRUMS only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ opl/opl_pico.c         |  4 ++--
+ src/fm1/fm1_controls.c | 10 +++++++---
+ src/i_oplmusic.c       | 20 +++++++++++++-------
+ 3 files changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/opl/opl_pico.c b/opl/opl_pico.c
+index 61d336c..6bd0024 100644
+--- a/opl/opl_pico.c
++++ b/opl/opl_pico.c
+@@ -580,8 +580,8 @@ int OPL_Queue_Pop(opl_callback_queue_t *queue,
+     *callback = qe->callback;
+ #else
+ #if FM1_DRUMS
+-    // (a third kind for the drum machine's steps: data 1 .. 16, which no track's address is)
+-    *callback = !qe->data ? RestartSong : (uintptr_t) qe->data <= 16 ? FM1_DrumStep : TrackTimerCallback;
++    // (a third kind for the drum machine's steps: data 1 .. 128, which no track's address is)
++    *callback = !qe->data ? RestartSong : (uintptr_t) qe->data <= 128 ? FM1_DrumStep : TrackTimerCallback;
+ #else
+     *callback = qe->data ? TrackTimerCallback : RestartSong;
+ #endif
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 52853be..f47caac 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -57,9 +57,9 @@ const char *fm1_fm6_name(int n);
+ #define FM1_FM6_PATCHES 0
+ #endif
+ #if FM1_DRUMS
+-// Prototype: SEQ brings in a beat under the song and steps through its patterns, ARP through its kits
+-// (fm1-doom firmware/fm1_drums.c).
+-extern volatile uint8_t fm1_drums_pattern, fm1_drums_kit;
++// Prototype: SEQ brings in a beat under the song and steps through its patterns, ARP through its kits, SAVE
++// through five loudnesses against the music (fm1-doom firmware/fm1_drums.c).
++extern volatile uint8_t fm1_drums_pattern, fm1_drums_kit, fm1_drums_loud;
+ int fm1_drums_patterns(void);
+ int fm1_drums_kits(void);
+ const char *fm1_drums_pattern_name(int n);
+@@ -278,6 +278,10 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         fm1_drums_kit = (uint8_t)((fm1_drums_kit + 1) % fm1_drums_kits());
+         fm1_say("DRUM KIT ", -1, fm1_drums_kit_name(fm1_drums_kit));
+     }
++    if (pressed & (1u << FM1_BTN_SAVE)) {
++        fm1_drums_loud = (uint8_t)((fm1_drums_loud + 1) % 5);
++        fm1_say("DRUM LEVEL ", fm1_drums_loud + 1, " OF 5");
++    }
+ #endif
+     // EDIT: all of it as it was
+     if (pressed & (1u << FM1_BTN_EDIT)) {
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index b15d40c..a19017f 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -365,13 +365,15 @@ void fm1_fm6_channel_off(int channel);
+ #endif
+ #if FM1_DRUMS
+ // Prototype: a drum machine in time with the song (fm1-doom firmware/fm1_drums.c). While it plays, the chip's
+-// percussion is silent; the song's drum notes go to it instead, and it is told of every sixteenth of the bar.
++// percussion is silent; the song's drum notes go to it instead, and it is told of every step of its pattern that
++// has a hit: a step is a thirty-second, counted through four bars (0 .. 127).
+ extern volatile uint8_t fm1_drums_pattern;
+ void fm1_drums_hit(int note, int volume);
++int fm1_drums_wants(int step);
+ void fm1_drums_step(int step);
+ unsigned int fm1_drums_bpm100 = 12000;      // the song's tempo, beats a minute x 100 (S_ChangeMusic knows the song)
+ static unsigned int fm1_song_pos;           // ticks from the song's start to the event last scheduled from
+-// (the callback queue of the small build knows its callbacks by their argument: a step is 1 .. 16, opl_pico.c)
++// (the callback queue of the small build knows its callbacks by their argument: a step is 1 .. 128, opl_pico.c)
+ void FM1_DrumStep(void *arg)
+ {
+     fm1_drums_step((int) (uintptr_t) arg - 1);
+@@ -1733,9 +1735,9 @@ static void ScheduleTrack(opl_track_data_t *track)
+ #endif
+ #if FM1_DRUMS
+     {
+-        // Every sixteenth that falls before the next event gets a callback of its own, timed from this
+-        // event: the drums follow the music's own clock. A tick is 1/140 s; a sixteenth is 2100 / bpm ticks.
+-        uint64_t step = ((uint64_t) 210000 << 16) / fm1_drums_bpm100;       // ticks, 16.16
++        // Every step with a hit that falls before the next event gets a callback of its own, timed from this
++        // event: the drums follow the music's own clock. A tick is 1/140 s; a thirty-second is 1050 / bpm ticks.
++        uint64_t step = ((uint64_t) 105000 << 16) / fm1_drums_bpm100;       // ticks, 16.16
+         uint64_t from = (uint64_t) fm1_song_pos << 16;
+         uint64_t to = from + ((uint64_t) nticks << 16);
+         uint64_t s;
+@@ -1743,8 +1745,12 @@ static void ScheduleTrack(opl_track_data_t *track)
+         for (s = (from + step - 1) / step; s * step < to; s++)
+         {
+             uint64_t wait = (((s * step - from) * us_per_beat) / ticks_per_beat) >> 16;
+-            OPL_SetCallback((wait * fm1_music_time) >> 16, FM1_DrumStep,
+-                            (void *) (uintptr_t) ((s & 15) + 1));
++
++            if (fm1_drums_wants((int) (s & 127)))
++            {
++                OPL_SetCallback((wait * fm1_music_time) >> 16, FM1_DrumStep,
++                                (void *) (uintptr_t) ((s & 127) + 1));
++            }
+         }
+         fm1_song_pos += nticks;
+     }
