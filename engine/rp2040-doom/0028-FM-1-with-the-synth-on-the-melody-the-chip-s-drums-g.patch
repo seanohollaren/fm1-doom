@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 17:14:01 -0700
+Subject: [PATCH] FM-1: with the synth on the melody, the chip's drums go round
+ three voices; a test hook for what the sound costs
+
+MEASURED in the browser build: with a synth sound chosen the emulated chip
+worked as hard for the song's drums alone as for the whole song, because
+with nine free voices every hit rang out in full. The drums now take the
+voices let go last, three of them. In the song as written 29 % of the
+chip's notes are drum hits, so a hit's tail was cut about 2.6 hits later:
+three voices keep the drums as they were, and the chip's work with a
+synth sound falls by about 30 %.
+
+Browser build only: fm1_web_cost, the time spent in the chip, the synth
+and the drum machine (web/measure_sound.js).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ opl/opl_pico.c      | 10 ++++++++++
+ src/fm1/fm1_audio.c | 17 +++++++++++++++--
+ src/fm1/fm1_web.c   |  8 ++++++++
+ src/i_oplmusic.c    | 16 ++++++++++++++--
+ 4 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/opl/opl_pico.c b/opl/opl_pico.c
+index eaca590..1dc64e5 100644
+--- a/opl/opl_pico.c
++++ b/opl/opl_pico.c
+@@ -187,6 +187,10 @@ extern uint8_t restart_song_state;
+ #endif
+ 
+ #if FM1
++#if FM1_WEB
++double emscripten_get_now(void);
++double fm1_web_ms[4];                       // (test hook) time spent in: the chip, the synth, the drums; frames mixed
++#endif
+ unsigned int fm1_pass_frames;               // frames of the pass being mixed that are already made
+ #endif
+ 
+@@ -249,7 +253,13 @@ void OPL_Pico_Mix_callback(audio_buffer_t *audio_buffer)
+ #elif USE_EMU8950_OPL
+             if (nsamples) {
+                 int32_t *sndptr32 = (int32_t *) (audio_buffer->buffer->bytes + filled * 4);
++#if FM1_WEB
++                double fm1_t0 = emscripten_get_now();     // (test hook: what the emulated chip costs, fm1_web_cost)
++#endif
+                 OPL_calc_buffer_stereo(emu8950_opl, sndptr32, nsamples);
++#if FM1_WEB
++                fm1_web_ms[0] += emscripten_get_now() - fm1_t0;
++#endif
+             }
+ #else
+             int16_t *sndptr = (int16_t *) (audio_buffer->buffer->bytes + filled * 4);
+diff --git a/src/fm1/fm1_audio.c b/src/fm1/fm1_audio.c
+index 528ed00..d23d26f 100644
+--- a/src/fm1/fm1_audio.c
++++ b/src/fm1/fm1_audio.c
+@@ -41,20 +41,33 @@ audio_buffer_t *take_audio_buffer(audio_buffer_pool_t *ac, bool block)
+ }
+ 
+ #if FM1_FM6
+-void fm1_fm6_mix(int16_t *stereo, uint32_t frames);     // prototype: Felucca's FM engine playing the music's melodic notes
++void fm1_fm6_mix(int16_t *stereo, uint32_t frames);     // the synth that can play the music's melodic notes (fm1-doom firmware/fm1_synth.c)
+ #endif
+ #if FM1_DRUMS
+-void fm1_drums_mix(int16_t *stereo, uint32_t frames);   // prototype: Felucca's drum voices, a beat under the music
++void fm1_drums_mix(int16_t *stereo, uint32_t frames);   // the drum machine under the music (fm1-doom firmware/fm1_drums.c)
+ #endif
+ 
+ void give_audio_buffer(audio_buffer_pool_t *ac, audio_buffer_t *buffer)
+ {
+     (void)ac;
++#if FM1_WEB
++    extern double fm1_web_ms[4];
++    double emscripten_get_now(void);
++    double t0 = emscripten_get_now(), t1;       // (test hook: what the synth and the drums cost, fm1_web_cost)
++#endif
+ #if FM1_FM6
+     fm1_fm6_mix(fm1_mix, buffer->sample_count);
+ #endif
++#if FM1_WEB
++    t1 = emscripten_get_now();
++    fm1_web_ms[1] += t1 - t0;
++#endif
+ #if FM1_DRUMS
+     fm1_drums_mix(fm1_mix, buffer->sample_count);
++#endif
++#if FM1_WEB
++    fm1_web_ms[2] += emscripten_get_now() - t1;
++    fm1_web_ms[3] += buffer->sample_count;
+ #endif
+     for (uint32_t i = 0; i < buffer->sample_count; i++) {
+         uint32_t k = (fm1_w + i) & (FM1_RING_FRAMES - 1u);
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index d96efc8..9b15b64 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -97,3 +97,11 @@ EMSCRIPTEN_KEEPALIVE void fm1_web_exit_level(void) { G_ExitLevel(); }
+ // test hook: how much of the game's heap is free or could be freed (the level's own data is never purged)
+ int Z_FreeMemory(void);
+ EMSCRIPTEN_KEEPALIVE int fm1_web_heap_free(void) { return Z_FreeMemory(); }
++// test hook: microseconds spent so far in the emulated chip (0), the synth (1), the drums and their limiter (2),
++// and mixer frames made (3); what = -1 sets them all to zero
++extern double fm1_web_ms[4];
++EMSCRIPTEN_KEEPALIVE int fm1_web_cost(int what)
++{
++    if (what < 0 || what > 3) { fm1_web_ms[0] = fm1_web_ms[1] = fm1_web_ms[2] = fm1_web_ms[3] = 0; return 0; }
++    return (int)(what == 3 ? fm1_web_ms[3] : fm1_web_ms[what] * 1000.0);
++}
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index 1a14bb7..992047e 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -360,6 +360,7 @@ extern volatile uint32_t fm1_music_time;
+ // firmware/fm1_synth.c: three of Felucca's sounds); the chip keeps the percussion. (The names are the first
+ // prototype's, which had Felucca's FM6 engine.)
+ extern volatile uint8_t fm1_fm6_on;
++#define FM1_CHIP_ROUND 3
+ void fm1_fm6_note_on(int channel, int key, int note, int velocity, int volume);
+ void fm1_fm6_note_off(int channel, int key);
+ void fm1_fm6_channel_off(int channel);
+@@ -519,11 +520,22 @@ static opl_voice_t *GetFreeVoice(void)
+ 
+     // Remove from free list
+ 
+-    result = voice_free_list[0];
++    i = 0;
++#if FM1_FM6
++    // With the synth on the melody the chip has only the song's drums, and with all nine voices to go round every
++    // hit rings out in full: MEASURED, the emulated chip then works as hard as it does for the whole song. So the
++    // drums go round the voices let go last (FM1_CHIP_ROUND of them), and a hit's tail ends when the third hit
++    // after it starts: about what the melody's notes did to it when they shared the chip.
++    if (fm1_fm6_on && voice_free_num > FM1_CHIP_ROUND)
++    {
++        i = voice_free_num - FM1_CHIP_ROUND;
++    }
++#endif
++    result = voice_free_list[i];
+ 
+     voice_free_num--;
+ 
+-    for (i = 0; i < voice_free_num; i++)
++    for (; i < voice_free_num; i++)
+     {
+         voice_free_list[i] = voice_free_list[i + 1];
+     }
