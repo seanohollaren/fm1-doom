@@ -43,6 +43,7 @@ node_modules/
 /site/frontend/dist-b6/
 /site/frontend/dist-b7/
 /site/frontend/dist-b15/
+/site/frontend/dist-b16/
 /site/infra/cdk.out/
 /site/infra/**/*.js
 /site/infra/**/*.d.ts
