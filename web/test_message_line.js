@@ -22,7 +22,10 @@ globalThis.Module = {
       await sleep(1500); await tap(PLAY); await sleep(300); await tap(PLAY); await sleep(300); await tap(PLAY); await sleep(3500);
       check('nothing is shown until something is turned', M._fm1_web_osd() === 0);
 
-      // ---- every instrument name
+      // ---- the synth's three sounds first, then every instrument name
+      let sounds = true;
+      for (let n = 1; n <= 3; n++) { await turn(PRESETS, 1); const v = M._fm1_web_osd(); sounds = sounds && (v & 255) >= 1 && !(v >> 8); }
+      check('the synth\'s three sounds are named, all of it fitting', sounds);
       const lines = [0, 0, 0, 0]; let clipped = [], silent = 0;
       for (let n = 1; n <= 128; n++) {
         await turn(PRESETS, 1);
@@ -36,7 +39,7 @@ globalThis.Module = {
       const said = [];
       const say = async (name, act) => { await act(); const v = M._fm1_web_osd(); said.push(`${name} ${v & 255}${v >> 8 ? ' CLIPPED' : ''}`); return v > 0 && !(v >> 8) && (v & 255) <= 3; };
       let ok = true;
-      ok &= await say('instrument off', () => turn(PRESETS, -128));
+      ok &= await say('instrument off', async () => { await turn(PRESETS, -100); await turn(PRESETS, -100); });
       ok &= await say('low-pass', () => turn(K1, -22));
       ok &= await say('high-pass', async () => { await turn(K1, 22); await turn(K1, 40); });
       ok &= await say('filter off', async () => { await turn(K1, -40); });
@@ -45,7 +48,8 @@ globalThis.Module = {
       ok &= await say('depth down', () => turn(ALGORITHM, -11));
       ok &= await say('depth at rest', () => turn(ALGORITHM, 3));
       ok &= await say('pitch', () => turn(K3, -12));
-      ok &= await say('tempo', () => turn(K4, 12));
+      ok &= await say('drum beat', () => turn(K4, 7));
+      ok &= await say('drums off', () => turn(K4, -7));
       ok &= await say('envelope knobs', () => tap(ENV));
       ok &= await say('attack', () => turn(K1, 6));
       ok &= await say('own attack', () => turn(K1, -6));
@@ -69,7 +73,7 @@ globalThis.Module = {
       check('three seconds on, the message is gone', M._fm1_web_osd() === 0);
       await sleep(200);
       const clean = panel();
-      await turn(PRESETS, 27);                                              // "MUSIC 27 * ELECTRIC GUITAR (CLEAN)"
+      await turn(PRESETS, 3 + 27);                                          // "MUSIC 27 * ELECTRIC GUITAR (CLEAN)"
       await sleep(150);
       const shown = M._fm1_web_osd(), lettered = panel();
       let n = 0, x0 = 240, x1 = -1, y0 = 240, y1 = -1, red = 0, pairs = 0;

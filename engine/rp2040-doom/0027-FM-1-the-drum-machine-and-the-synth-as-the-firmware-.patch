@@ -1,0 +1,171 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 16:30:24 -0700
+Subject: [PATCH] FM-1: the drum machine and the synth as the firmware has
+ them: one kit, three sounds, KNOB 4 and PRESETS
+
+The hooks for the sound beside the game (fm1-doom firmware/fm1_sound.c) are
+no longer a prototype's. With FM1_DRUMS: KNOB 4 picks the beat (no tempo
+knob, no SEQ / ARP / SAVE handlers, the song's own drum notes are not
+passed on), and SAVE toggles the engine's own frames-a-second count.
+With FM1_FM6: PRESETS' first clicks are the synth's sounds.
+
+Browser build: a test hook for the heap's free memory, and the heap at
+176 KB, a little under what the FM-1 has left for it now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_controls.c | 35 ++++++++++++-----------------------
+ src/fm1/fm1_web.c      |  3 +++
+ src/fm1/fm1_web_ram.c  |  5 ++++-
+ src/i_oplmusic.c       | 15 +++++++--------
+ 4 files changed, 26 insertions(+), 32 deletions(-)
+
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index dabae8a..f3eac69 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -42,16 +42,17 @@ volatile uint32_t fm1_music_time = 65536;
+ #define FM1_DEPTH_STEPS 8                                    /* 1.5 dB of modulation each */
+ static const uint8_t FM1_ADSR_STEPS[4] = {6, 8, 10, 8};     /* attack, decay, sustain, release (i_oplmusic.c has what a step is) */
+ static const char *const FM1_ADSR_NAMES[4] = {"ATTACK ", "DECAY ", "SUSTAIN ", "RELEASE "};
++#if !FM1_DRUMS                                               /* (with the drum machine KNOB 4 picks the beat: no tempo knob) */
+ #define FM1_TEMPO_STEPS 12                                   /* each way; the speed in percent, a twelfth of a doubling a step */
+ static const uint8_t FM1_TEMPO[2 * FM1_TEMPO_STEPS + 1] = {
+     50, 53, 56, 59, 63, 67, 71, 75, 79, 84, 89, 94, 100, 106, 112, 119, 126, 133, 141, 150, 159, 168, 178, 189, 200
+ };
+ static int8_t fm1_tempo;                                     /* -FM1_TEMPO_STEPS .. FM1_TEMPO_STEPS */
++#endif
+ #if FM1_FM6
+-// Prototype: the PRESETS knob's first clicks are the factory presets of Felucca's synth, engine by engine
+-// (fm1-doom firmware/fm1_felucca.c; 66 of them), which then plays the melodic notes with the chorus, delay and
+-// reverb the preset sets; the game's own 128 instruments follow. (The names are the first prototype's, which
+-// had Felucca's FM6 engine only.)
++// The PRESETS knob's first clicks are the sounds of the synth beside the game (fm1-doom firmware/fm1_synth.c:
++// three of Felucca's, with its chorus, delay and reverb), which then plays the melodic notes; the game's own 128
++// instruments follow. (The names are the first prototype's, which had Felucca's FM6 engine.)
+ #define FM1_FM6_PATCHES fm1_fm6_count()
+ extern volatile uint8_t fm1_fm6_on;
+ int fm1_fm6_count(void);
+@@ -60,13 +61,10 @@ const char *fm1_fm6_name(int n);
+ #define FM1_FM6_PATCHES 0
+ #endif
+ #if FM1_DRUMS
+-// Prototype: SEQ brings in a beat under the song and steps through its patterns, ARP through its kits, SAVE
+-// through five loudnesses against the music (fm1-doom firmware/fm1_drums.c).
+-extern volatile uint8_t fm1_drums_pattern, fm1_drums_kit, fm1_drums_loud;
++// KNOB 4 brings in a beat under the song (fm1-doom firmware/fm1_drums.c): off at the bottom, then its patterns.
++extern volatile uint8_t fm1_drums_pattern;
+ int fm1_drums_patterns(void);
+-int fm1_drums_kits(void);
+ const char *fm1_drums_pattern_name(int n);
+-const char *fm1_drums_kit_name(int n);
+ #endif
+ static uint8_t fm1_preset;                                   /* the PRESETS knob: 0 the music's own, then the patches and instruments */
+ static uint8_t fm1_page;                                     /* what KNOB 1 .. KNOB 4 do: */
+@@ -128,6 +126,9 @@ static const fm1_map_t FM1_MAP[] = {
+     {24, KEY_RCTRL}, {25, KEY_RSHIFT}, {26, ' '},
+     {BTN(FM1_BTN_HOME), KEY_ESCAPE}, {BTN(FM1_BTN_PLAY), KEY_ENTER}, {BTN(FM1_BTN_REC), KEY_RCTRL},
+     {BTN(FM1_BTN_OCTDN), FM1_KEY_PREVWEAPON}, {BTN(FM1_BTN_OCTUP), FM1_KEY_NEXTWEAPON}, {BTN(FM1_BTN_FX), 'y'},
++#if FM1_DRUMS
++    {BTN(FM1_BTN_SAVE), '\\'},              /* the engine's own frames-a-second count on the status bar, on and off */
++#endif
+ };
+ #define FM1_NMAP (sizeof FM1_MAP / sizeof FM1_MAP[0])
+ 
+@@ -279,20 +280,6 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         } else
+             fm1_say("WOBBLE OFF", -1, "");
+     }
+-#if FM1_DRUMS
+-    if (pressed & (1u << FM1_BTN_SEQ)) {
+-        fm1_drums_pattern = (uint8_t)((fm1_drums_pattern + 1) % (fm1_drums_patterns() + 1));
+-        fm1_say("DRUMS: ", -1, fm1_drums_pattern_name(fm1_drums_pattern));
+-    }
+-    if (pressed & (1u << FM1_BTN_ARP)) {
+-        fm1_drums_kit = (uint8_t)((fm1_drums_kit + 1) % fm1_drums_kits());
+-        fm1_say("DRUM KIT ", -1, fm1_drums_kit_name(fm1_drums_kit));
+-    }
+-    if (pressed & (1u << FM1_BTN_SAVE)) {
+-        fm1_drums_loud = (uint8_t)((fm1_drums_loud + 4) % 5);   /* a step quieter each time, and round to the loudest */
+-        fm1_say("DRUM LEVEL ", fm1_drums_loud + 1, " OF 5");
+-    }
+-#endif
+     // EDIT: all of it as it was
+     if (pressed & (1u << FM1_BTN_EDIT)) {
+ #if FM1_DRUMS
+@@ -307,7 +294,9 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+ #endif
+         fm1_music_pitch = fm1_music_depth = 0;
+         fm1_music_adsr[0] = fm1_music_adsr[1] = fm1_music_adsr[2] = fm1_music_adsr[3] = 0;
++#if !FM1_DRUMS
+         fm1_tempo = 0;
++#endif
+         fm1_page = FM1_PAGE_MAIN;
+         fm1_music_time = 65536;
+         FM1_Retune();
+diff --git a/src/fm1/fm1_web.c b/src/fm1/fm1_web.c
+index e68f727..d96efc8 100644
+--- a/src/fm1/fm1_web.c
++++ b/src/fm1/fm1_web.c
+@@ -94,3 +94,6 @@ EMSCRIPTEN_KEEPALIVE int fm1_web_osd(void) { return fm1_osd_probe(); }
+ // test hook: finish the level as the exit switch would (the page's console: Module._fm1_web_exit_level())
+ void G_ExitLevel(void);
+ EMSCRIPTEN_KEEPALIVE void fm1_web_exit_level(void) { G_ExitLevel(); }
++// test hook: how much of the game's heap is free or could be freed (the level's own data is never purged)
++int Z_FreeMemory(void);
++EMSCRIPTEN_KEEPALIVE int fm1_web_heap_free(void) { return Z_FreeMemory(); }
+diff --git a/src/fm1/fm1_web_ram.c b/src/fm1/fm1_web_ram.c
+index c2f643f..e3ec5f4 100644
+--- a/src/fm1/fm1_web_ram.c
++++ b/src/fm1/fm1_web_ram.c
+@@ -9,5 +9,8 @@
+ #include <stdint.h>
+ #include "fm1.h"
+ 
+-static uint8_t fm1_ram[200 * 1024] __attribute__((aligned(4)));
++// 176 KB: a little under what the FM-1's linker script leaves the game since b15 (183,264 bytes, after the 50 KB
++// of the synth's delay and reverb lines; before that 233 KB, with 200 KB here). E1M1 uses about 14 KB of it
++// (web/measure_heap.js).
++static uint8_t fm1_ram[176 * 1024] __attribute__((aligned(4)));
+ uint8_t *fm1_heap(uint32_t *size) { *size = sizeof fm1_ram; return fm1_ram; }
+diff --git a/src/i_oplmusic.c b/src/i_oplmusic.c
+index 8275c8b..1a14bb7 100644
+--- a/src/i_oplmusic.c
++++ b/src/i_oplmusic.c
+@@ -356,19 +356,19 @@ extern volatile uint8_t fm1_music_instr, fm1_music_adsr[4];
+ extern volatile int8_t fm1_music_pitch, fm1_music_depth;
+ extern volatile uint32_t fm1_music_time;
+ #if FM1_FM6
+-// Prototype: with fm1_fm6_on set, the melodic notes are played by Felucca's six-operator engine and not by the
+-// chip (fm1-doom firmware/fm1_fm6.c); the chip keeps the percussion.
++// With fm1_fm6_on set, the melodic notes are played by a synth beside the game and not by the chip (fm1-doom
++// firmware/fm1_synth.c: three of Felucca's sounds); the chip keeps the percussion. (The names are the first
++// prototype's, which had Felucca's FM6 engine.)
+ extern volatile uint8_t fm1_fm6_on;
+ void fm1_fm6_note_on(int channel, int key, int note, int velocity, int volume);
+ void fm1_fm6_note_off(int channel, int key);
+ void fm1_fm6_channel_off(int channel);
+ #endif
+ #if FM1_DRUMS
+-// Prototype: a drum machine in time with the song (fm1-doom firmware/fm1_drums.c). While it plays, the chip's
+-// percussion is silent; the song's drum notes go to it instead, and it is told of every step of its pattern that
+-// has a hit: a step is a thirty-second, counted through four bars (0 .. 127).
++// A drum machine in time with the song (fm1-doom firmware/fm1_drums.c). While it plays, the chip's percussion is
++// silent, and it is told of every step of its pattern that has a hit: a step is a thirty-second, counted through
++// four bars (0 .. 127).
+ extern volatile uint8_t fm1_drums_pattern;
+-void fm1_drums_hit(int note, int volume);
+ int fm1_drums_wants(int step);
+ void fm1_drums_step(int step);
+ unsigned int fm1_drums_bpm100 = 12000;      // the song's tempo, beats a minute x 100 (S_ChangeMusic knows the song)
+@@ -1269,8 +1269,7 @@ static void KeyOnEvent(opl_track_data_t *track, midi_event_t *event)
+ #if FM1_DRUMS
+         if (fm1_drums_pattern)
+         {
+-            fm1_drums_hit((int) key, (int) volume);
+-            return;
++            return;     // (the drum machine plays: the chip's own percussion is silent)
+         }
+ #endif
+         instrument = &percussion_instrs[key - 35];

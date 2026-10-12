@@ -1777,3 +1777,428 @@ depth for ALGORITHM, and asked for a toggle so that envelope and filter wobble c
   `firmware/installed_a69f245d/`. Source commit `e658754`.
 - NOT VERIFIED until it runs on the FM-1: everything about how it sounds there; that KNOB 1 to KNOB 4 are the
   encoders in that order.
+
+## 2026-10-10 — Prototype: Doom's music on Felucca's six-operator FM engine (browser build only; nothing for the device yet)
+
+Sean: the game's instruments on PRESETS sound like "cheap mini sounds", Felucca's are "beefy and compelling";
+could those be heard in Doom? He agreed to a listening prototype in the browser build first.
+
+- **Licence** (my reading of Felucca's LICENSING.md, not legal advice): GPL-3.0-only covers Felucca's code "and
+  its own assets"; the FM6 factory patches are "Felucca's own"; the FM core (`fm6_core.c`) is msfa from Dexed,
+  Apache-2.0. Our firmware is already a GPL-3 derivative of Felucca with its source published, so using the
+  engine and patches is allowed on the same terms. "Felucca" and "Hügelton Instruments" are the author's names:
+  credit, not branding. Its CONTRIBUTING.md points forks and mods to Discussions > Show and tell.
+- **Why not just more presets**: a Felucca preset is parameters for one of Felucca's engines; the game's music is
+  played by an emulated two-operator chip (9 voices, GENMIDI instruments). The engine has to come along.
+- **What was built.** `firmware/fm1_fm6.c`: includes Felucca's `fm6_core.c` and its generated tables and factory
+  patches from the Felucca checkout, unchanged, and wraps them as a six-voice synth (Felucca's own cap for this
+  engine on the FM-1): note on / off by channel and key, the oldest released voice stolen first, one patch for
+  every channel, the DC blocker and output stage as Felucca's `eng_fm6.c`. It renders 32-sample blocks at the
+  44,100 Hz its tables are made for and is interpolated to the mixer's 49,716 Hz, so pitch and envelopes are
+  Felucca's. Engine hooks (patch 0020, all under `FM1_FM6`): `i_oplmusic.c` sends melodic note-ons and
+  note-offs there when a patch is chosen and leaves the chip the percussion; `fm1_audio.c` adds its sound to
+  each mixer pass; `fm1_controls.c` puts the eight patches on the PRESETS knob's first eight clicks
+  ("FELUCCA 1 TINE EP" .. "FELUCCA 8 NYLON PICK"), the game's 128 instruments after them. The pitch and tempo
+  knobs work on it; the FM depth knob is its modulators' level; the envelope knobs do not reach it yet.
+- `FM6=1 sh web/build.sh` builds it into `web/build-fm6` (preview entry `fm1-doom-fm6`, port 8798). The ordinary
+  browser build and the device firmware are built without the flag and are unchanged (their tests pass; b14 on
+  the site is still source commit `e658754`).
+- VERIFIED headless, `node web/test_fm6.js` (12 checks): on each of the eight patches the engine sounds the
+  melody (up to 6 voices) and the chip only drums; RMS 970 .. 1770 against 1700 for the game's own, no clipping,
+  no underruns; PRESETS 9 is the chip again; EDIT restores the game's music. A 64 s recording of the game's own
+  music and then each patch on E1M1: `web/build-fm6/doom-on-felucca-fm6.m4a` (not in git).
+- **Cost on the device, from Felucca's own test** (`Felucca/build/host/fm6_test`, run here): 34 to 179 host
+  instructions per sample and voice depending on the patch, which Felucca's measured ratio (1.7 % of the chip
+  per 100) puts at 0.6 % to 3.0 % a voice, about 18 % of the processor for six voices of the heaviest patch.
+  Size in Felucca's build: about 13.6 KB of flash and 9.4 KB of RAM for the engine with all four tracks; here
+  one patch and six voices need about 1.7 KB of RAM. Block 1 has 15.7 KB of flash spare; the large-buffer RAM
+  region is full, so its state would have to live in the other region (the game heap gives way).
+- NOT DONE, and what a device build would still need: the size checked in our build, the engine's state placed,
+  the frame rate with it measured on the FM-1 (Sean has not yet reported any frame rate), envelope knobs mapped
+  onto the patch, and the patch choice somewhere better than the first eight clicks if it stays.
+- ASSUMED: that Felucca's 1.7 % per 100 figure carries over to our firmware (same chip, same start-up code and
+  clock set-up from Felucca's HAL; not measured by us).
+
+## 2026-10-10 — Prototype: a drum machine under the song, with Felucca's drum voices (browser build only)
+
+Sean: press a button and a drum track starts on the Doom song, "really crunchy snare and bass", maybe four on
+the floor; is it possible?
+
+- **Yes, and it is the cheaper of the two prototypes.** `firmware/fm1_drums.c`: Felucca's DRUM engine
+  (`drum_voice.c` with `dsp.c`, unchanged, read from the Felucca checkout; GPL-3.0-only like the rest) as an
+  eight-lane machine. SEQ steps through: off, the song's own drum part (its General MIDI drum notes on real
+  drum voices, through Felucca's own note map), a rock beat, four on the floor, half time. ARP steps through
+  the kits: Felucca's own and its five model kits ("80", "10", "66", "55", "77"). While it plays the chip's
+  percussion is silent. EDIT turns it off with everything else.
+- **Staying in time.** MEASURED from the songs' note times in the WAD: E1M1 is at 110 beats a minute (a bar is
+  305.45 of the music's 1/140 s ticks; the song is exactly 44 bars, 13,440 ticks), the title jingle at 140. The
+  music's player schedules a callback for every sixteenth that falls before its next event, timed from the event
+  before it, on the same timer as its own notes (engine patch 0021, under `FM1_DRUMS`), so the beat cannot
+  drift against the tune, restarts with the song's loop and follows the tempo knob. A hit is queued with its
+  place in the mixer pass (`fm1_pass_frames`, new in `opl_pico.c`) and struck there, within a 32-sample block
+  (under a millisecond).
+- DEAD END on the way: the first build crashed about 100 s in, untouched. The small build's callback queue
+  (`opl_pico.c`, `LIMITED_CALLBACK_TYPES`) does not store a callback's function: it takes any callback with an
+  argument to be the track's and one without to be the song's restart, so each drum step was run as a track
+  event on a bogus track. It now knows a third kind (arguments 1 .. 16). The queue holds 10 entries; the
+  steps add one or two.
+- VERIFIED headless, `node web/test_drums.js` (16 checks): each pattern makes its number of hits per bar of the
+  song (13, 10, 7; measured 12.8, 9.7, 7.1 against the music's own tick count), the same at double tempo; the
+  chip's drums are silent meanwhile and back afterwards; the five model kits play; it runs together with the
+  FM6 prototype; no clipping to speak of (peaks about 20,000 of 32,767), no underruns; the song plays through
+  its loop twice with the drums on and off. Recording: `web/build-fm6/doom-drum-machine.m4a` (not in git).
+- **Cost on the device, from Felucca's own test** (`Felucca/build/host/drum_test`, run here): a voice costs only
+  while it sounds: kick 1.5 %, snare 2.0 %, a hat 1.0 % of the chip by Felucca's ratio, so a busy bar is a few
+  per cent. In Felucca's build the voices are a little over 5 KB of flash; their state here is about 1.5 KB.
+- NOT DONE: nothing for the device. Notes of the FM6 prototype are still applied at the start of a mixer pass
+  (up to 10 ms early); the drums are not.
+
+## 2026-10-11 — Drum machine prototype, second pass: heavier kits and metal patterns (browser build only)
+
+Sean on the first pass: it works, but "not the kind of aggressive punchy drums that I was hoping for"; he wants
+"super noticeable options, like metal double bass", and asked for the route.
+
+- **What was wrong with pass one, MEASURED on the drums alone:** Felucca's kits as designed are clean and
+  dynamic (peak 9 times RMS on a rock beat) and I had mixed them at a third of their level, under the music.
+- **Kits.** Two set up here from Felucca's voices, ahead of its six: METAL (the kick tuned up 7 semitones,
+  short, a big sweep, driven, with a 3 kHz clave struck with it as a beater click; the snare bright with all
+  its wires and a clap on top; a low short open hat as a china) and PUNCH (the round long kick with a rim's
+  knock, a fat long snare). Each kit's sum goes into a soft clip (drive x1.3) and under every kick and snare
+  the rest of the mix steps back by about a third for a tenth of a second. Each hit has a strength (a fast foot
+  plays lighter). The whole sum has a soft top above half scale in place of hard clipping. SAVE steps five
+  loudnesses, 3 dB apart.
+- DEAD END: the first settings (drive x2, level 0.8, long cymbals) measured peak 1.4 to 2.7 times RMS and an RMS
+  of 9,000 to 17,000 against the music's 1,700: a wall with no hits in it. Now, at the middle loudness: METAL
+  double bass RMS 6,300, peak 18,500 (2.9); rock 4,600 (4.0); half time 3,000 (6.2).
+- **Patterns**, on a bar of 32 steps (thirty-seconds): DOUBLE BASS (kick on every sixteenth), GALLOP (an
+  eighth and two sixteenths a beat, as the riff goes), THRASH (kick on the beats, snare between), BLAST (kick
+  and snare by turns), MACHINE GUN (kick on every thirty-second), ROCK, FOUR ON THE FLOOR, HALF TIME, then the
+  song's own part. Most have a crash on the first beat of every fourth bar and a snare-and-toms fill before
+  it; E1M1 is 44 bars, so the phrases close with the song's loop. Engine patch 0022: a step is a thirty-second
+  counted through four bars (0 .. 127) and only steps with a hit get a timer (the queue holds 10).
+- VERIFIED headless (`node web/test_drums.js`, 25 checks): each pattern's hits over eight bars of the song are
+  the tables' (188, 186, 136, 196, 318, 110, 81, 58), the same at double tempo; all eight kits play; the five
+  loudnesses rise and wrap (RMS 3,400 to 13,200 with the music); no flat tops, no underruns at the game's
+  own speed. Tour recording: `web/build-fm6/doom-drum-machine-2.m4a`.
+- NOT VERIFIED: that it sounds aggressive to Sean. I cannot hear it; the figures only say that the hits now
+  stand well clear of the music and of their own tails.
+- **The route from here, if synthesised voices are not enough:** (1) recorded drum hits in place of Felucca's
+  voices for kick and snare: the usual way to a real metal kit; needs a source we may ship (CC0 or our own
+  recording) and flash: about 2 to 4 KB a hit at 22 kHz 8-bit, against 15.7 KB spare, so a kick, a snare and a
+  cymbal at most beside nothing else; (2) the game's own sounds as a kit (a shotgun for a snare), which are in
+  flash already and cost nothing; (3) more voicing of what is there.
+
+## 2026-10-11 — Why Sean did not see the second pass: the browser's cache
+
+- He loaded the prototype page and saw the first pass's patterns and kits. VERIFIED: the server had the new
+  files (curl: the new wasm, 1,077,822 B); the in-app browser, asked for the same address, showed the old
+  page and loaded the old `doom.js` and `doom.wasm` without asking the server. Python's plain `http.server`
+  sends a last-modified date and nothing else, and a browser then reuses its copy for a share of the file's
+  age: hours, for a page a day old.
+- Fixed: `web/serve.py DIR PORT` (new) serves a build to this computer only with `Cache-Control: no-store`;
+  `web/build.sh` writes the build's time into the page ("built 11 Oct 10:15" under the picture) and into the
+  addresses of the two game files. The two preview entries use it. VERIFIED in the in-app browser after one
+  reload: the new page, the stamped files, `no-store`.
+- LESSON for my own checks: I had confirmed the page with curl and the game with Node, neither of which has a
+  cache. A page meant for Sean's browser has to be looked at in a browser.
+
+## 2026-10-11 — Recorded takes for Sean to review away from the computer (a private page, not the site)
+
+- He asked for a page on the site with recordings of the prototype's settings, to be merged and deployed from
+  GitHub. Two things stood in the way of doing exactly that, so the page is a private one instead
+  (https://claude.ai/artifact/QmL1iJKpxRVwip15HRVbXG, open only to him):
+  1. `controls-b8` serves firmware b14 from the installer, and no build after b7 has run on an FM-1 that I know
+     of. Merging the branch would put untested firmware in front of the public; the site's rule is that only a
+     build that has run on a device goes on it.
+  2. The recordings are Doom's own music and sounds. Deployed from GitHub they would have to be committed to
+     the public repository, where they would stay in its history; the project keeps game data and what is made
+     from it out of the repository (`web/samples/` is ignored for that reason).
+  If he still wants a page on the site: a branch off `main` with only that page would leave the installer alone;
+  the second point is his to weigh.
+- `web/record_sample.js OUT.wav PATTERN KIT LEVEL DIP PATCH` (new) records the same four bars of E1M1 (bars 5 to
+  8, found with a new test hook for the song's position) from the prototype build with one set of settings, so
+  takes differ only in the settings. 45 takes: the game's own; drum level 1 to 3 against music dip 1 to 4 on
+  double bass and on a rock beat (METAL kit); all nine patterns and all eight kits at level 2, dip 2; Felucca's
+  eight FM patches; one with drums and a patch together. MP3, 96 kbit/s mono, 4.6 MB in all.
+- The page plays a take on a loop, carries on from the same place in the bar when another is tapped, and lets
+  him keep takes and copy the list. NOT VERIFIED on a phone by me; the files are served as audio/mpeg.
+- The measured levels of the takes, for when he reports back (RMS of the whole mix; the game's own is 2,204):
+  double bass at level 1 / 2 / 3 is about 3,700 / 4,800 / 6,500; rock 3,000 / 3,800 / 5,000; the dip changes
+  the RMS by under 3 %.
+
+## 2026-10-11 — Drum machine prototype, third pass: Felucca's own effects chain, after a video (browser build only)
+
+Sean sent a YouTube short as "the exact super punchy and crunchy drum sound I'm dreaming of ... supposed to be
+running on felucca": https://youtube.com/shorts/9qCd4tj8J3U ("FM-1 Cyberpunk Jam | Felucca 1.1.5.1", Stanley
+Gurvich).
+
+- I cannot hear it. VERIFIED from the page's own text: the sounds were made with his own web / phone editor for
+  the FM-1, which is not published yet; "the felucca live fx"; "khs limiter on the master" (a studio limiter
+  plug-in on the recording). So it is the drum engine we already use (our Felucca checkout is v1.1.5), with
+  patches we cannot see, Felucca's effects, and limiting twice over. ASSUMED: the punch is mostly the limiting,
+  the crunch the engine's drive, the track distortion or the live CRUSH.
+- **What Felucca does after its drum voices** (VERIFIED in its source), none of which passes one and two used:
+  `eng_drum.c drum_render`: DRV, each voice x1 to x4 into the soft clip with its level kept, then x1.25 under a
+  soft knee at 24,000; `fx.c track_dist`: DIST on the track (a 55 Hz low cut, drive up to x9, a lopsided soft
+  clip, a two-pole tone filter that closes as the drive rises, make-up); `perform.c`: CRUSH, of the live
+  effects, on the whole mix (12 down to 5 bits, each sample held 1 to 8 times); `fx.c master_out`: a DC blocker,
+  a peak limiter (threshold 18,000, gives way in 4 samples, comes back over about 0.1 s), then the soft clip.
+- **Built:** five kits after the eight (`firmware/fm1_drums.c`), on those stages copied as they are:
+
+  | kit | voices | DRV | DIST | CRUSH | level x256 |
+  |---|---|---|---|---|---|
+  | LIMIT | Felucca's own kit | 0 | 0 | 0 | 132 |
+  | CRUNCH | Felucca's own kit | 70 | 30 | 0 | 161 |
+  | SLAM | the METAL kit's | 100 | 40 | 0 | 139 |
+  | FUZZ 80 | Felucca's 80 kit | 127 | 105 | 0 | 150 |
+  | CRUSH | Felucca's own kit | 60 | 0 | 50 | 113 |
+
+  All five send the whole mix through the master stage while a pattern is on: the music goes in at twice its
+  level (five steps on the page's M key, x0.7 to x2.8; the screen says MUSIC PUSH), so a hit pushes it down and
+  it comes back between hits. The chain fades in and out over 40 ms with the pattern. CRUSH is on the kit only,
+  not on the music as in Felucca (Sean's earlier verdict on distortion over the whole mix). The levels are set
+  so that a rock beat goes into the limiter at the same strength on every kit (RMS 6,200, 3 dB over the music
+  as it goes in): the kits differ in what a hit is, not in how loud.
+- DEAD END: a make-up gain of x1.56 after the soft clip, to bring its top (16,400) up to the other kits' peaks.
+  The limiter lets the first samples of a hit through, the soft clip rounds them off near full scale, and the
+  gain then clipped them flat at 32,767. Felucca has no gain there; neither have we now.
+- MEASURED, and new to me: **the game's own mix sits 1,431 above zero** (the take "own": RMS 2,204, of which
+  1,676 is sound). The chip's music is lopsided (half-wave operator shapes). Harmless at a DAC, but it used up
+  one side of the limiter's room, so Felucca's DC blocker went in ahead of the limiter, as in Felucca. Any
+  later stage that clips or limits the game's sound needs the same.
+- **BUG FOUND AND FIXED** (VERIFIED: six of the first 23 takes stopped with "memory access out of bounds"; none
+  after the fix). Since pass two, every step with a hit before the song's next event got a callback of its own.
+  The small build's callback queue holds 10, its "full" check is an assert that is compiled out, and a full
+  queue writes its entry before the array. A long note with a busy pattern does it: the title tune's last note
+  with any pattern of more than 8 hits a bar. E1M1 itself never has such a note, which is why 100 s tests and 45
+  takes passed; the new takes needed more key presses at the title and so sat there longer. Engine patch 0025:
+  the steps are a chain (one callback waits; when it has played its step it sets the next), and with
+  `FM1_DRUMS` a full queue drops the callback. Nothing changes in a build without `FM1_DRUMS` (the device's).
+  `web/test_drums.js` now starts with a pattern on through the title tune.
+- VERIFIED headless: `node web/test_drums.js` (33 checks: all 13 kits play the pattern; a limiter kit is louder
+  than twice the music with no flat tops, and with the drums off the music is back at its level);
+  `node web/test_fm6.js`; the normal build's `test_sound_knobs.js`; `sh firmware/test.sh`.
+- MEASURED on the takes (bars 5 to 8 of E1M1; RMS of the whole mix, peak; the game's own is 2,204 / 14,260):
+
+  | kit | rock | double bass | four on the floor |
+  |---|---|---|---|
+  | LIMIT | 4,505 / 22,423 | 6,319 / 21,924 | 4,433 / 21,239 |
+  | CRUNCH | 5,718 / 18,230 | 7,963 / 18,234 | 5,352 / 18,149 |
+  | SLAM | 5,934 / 18,039 | 7,784 / 18,133 | 5,051 / 18,284 |
+  | FUZZ 80 | 6,307 / 17,675 | 8,688 / 17,631 | 6,658 / 18,129 |
+  | CRUSH | 4,861 / 21,868 | 7,032 / 21,719 | 4,936 / 20,772 |
+
+  For comparison the second pass's METAL kit at drums 2, dip 2: rock 3,846, double bass 4,828. So these are
+  2 to 5 dB louder as a whole, by design: the music between hits is about twice as loud as the game's own.
+  With more music pushed in, the whole gets slightly quieter (CRUNCH double bass at drums 3: 8,582, 8,359,
+  7,963, 7,536 for push 2 to 5), because the limiter then works harder on every hit.
+- **Review page, version 2** (the same private address): a new first section with the five kits against three
+  patterns, a grid of drum level 2 to 4 against music push 2 to 5 on CRUNCH with double bass, and one take with
+  Felucca's Round bass patch on the melody. 28 new files, 73 in all.
+- NOT VERIFIED: how any of it sounds, and whether it is nearer the video. Not measured: the cost on the chip.
+  The limiter divides once a frame while it works (49,716 times a second), DIST and the DC blocker are a few
+  multiplies a frame; Felucca runs the same stages on the same chip, at 44,100.
+- LESSON: I recorded the takes three times (the crash, then the DC offset). Before designing a stage that
+  depends on level, measure the input's offset and peaks first; and test a prototype where the recorder will
+  use it (at the title, with many presses), not only where the test does.
+
+## 2026-10-11 — Sean's first verdict on the third pass; which Felucca sounds the prototype has
+
+- Sean, by ear, on the review page's grid: the default square (CRUNCH kit, double bass, drums 3, music 4, that is
+  the music into the limiter at twice its level) "sounds pretty good to me". That is what the prototype build
+  starts with on that kit, so nothing changes. VERIFIED by him on the recording only, not in the game.
+- He asked how the Felucca patches on the page were chosen: none of the ones he was most interested in is there.
+  They were not chosen by sound. The prototype has one of Felucca's engines, FM6 (the one the brief names for
+  Phase 4), and its eight factory patches are all that engine has. VERIFIED in Felucca v1.1.5's source: the
+  PRESETS knob there walks twelve engines with about 70 factory presets (ANALOG 12, FM6 8 + 8 converted from
+  the retired four-operator engine, PHASE 6, LOFI 5, VOICE 4, TRIO 5, WHEEL 5, GRAIN 4, PHYS 9, NOISE 4, DRUM,
+  and SAMPLE's recorded sounds), and every preset also sets chorus, delay and reverb sends, which the prototype
+  does not have. So the sounds he likes on the device are most likely another engine's. Open: which ones.
+
+## 2026-10-11 — Felucca's whole synth under the music, with its effects (browser build only); Sean's picks
+
+- Sean, after the list of Felucca's presets: he is interested in RAVE, and thinks what he was missing in the
+  first prototype is the chorus, delay and reverb the presets set. Both were right to chase: the first
+  prototype (`firmware/fm1_fm6.c`, now removed; last in commit 7099f2e) had one engine of twelve, dry.
+- **Built:** `firmware/fm1_felucca.c`: Felucca's sound core as its own host tests build it (`tests/hostsim.c`:
+  libc, engines, voices, effects, sequencer in one compilation unit), with the music's melodic notes played on
+  it. PRESETS 1 to 66 are its factory presets in the order of its own PRESETS knob (ANALOG 12, FM6 8, PHASE 6,
+  LOFI 5, SAMPLE 4, VOICE 4, TRIO 5, WHEEL 5, GRAIN 4, PHYS 9, NOISE 4; DRUM and SLICE left out), then the
+  game's 128. A preset is set as Felucca's knob sets it: engine, eight values, envelope, mono or poly, the four
+  sends (distortion, chorus, delay, reverb). The delay follows the song's tempo. Notes are queued with their
+  place in the mixer's pass, as the drum hits are.
+- Felucca is four parts sharing eight voices. Each of the music's channels gets a part (E1M1 uses three), all
+  on the same preset, so the 14 presets Felucca plays one note at a time (RAVE among them) keep each line.
+  MEASURED on E1M1: a channel holds up to two notes at once, so those presets thin its chords; the recorder
+  can force chords (`fm1_fm6_poly`), and the page has RAVE both ways.
+- Level: Felucca's output (its own limiter keeps it near 18,000) goes into the game's mix at 96/256. MEASURED on
+  the takes: RAVE 2,527 RMS against the game's own 2,204 (of which 1,431 is the chip's offset, so about 3.5 dB
+  more sound); the presets range from 700 (plucked PHYS sounds) to 2,970.
+- VERIFIED headless: `node web/test_felucca.js` (7 checks): all 66 play the melody with the chip only on
+  drums, nothing clipped, every name fits the screen; RAVE uses three parts; PRESETS 67 is the chip again; the
+  pitch knob and EDIT work; no underruns. `node web/test_drums.js` passes with it (34 checks).
+- The wasm grew from 1,080 KB to 1,348 KB. SAMPLE's second preset is the first again (a retired set's alias).
+- **Review page, version 3:** a new first section: RAVE (as Felucca plays it, and with chords), RAVE over the
+  CRUNCH drums, and every preset by engine: 69 new takes, 142 in all, recorded eight at a time (3 min 43 s; the
+  recorder's underrun count stayed at its start-up value on every take).
+- **Sean's verdict by ear (2026-10-11):** "Oh yeah this is awesome. Saw Lead, Rave, Acid, Pulse Lo all sound
+  awesome." That is ANALOG SAW LEAD, RAVE and ACID, and LOFI PULSE LD: two engines, all four one-note presets.
+- **KNOB 4 is the drum selector** (his request: "I don't like the tempo control anyway"). In the prototype
+  (`FM1_DRUMS`) KNOB 4 on the first page picks the beat, off at the bottom, and there is no tempo knob; the kit
+  the machine starts on is CRUNCH (his pick), level 3, push 4. Engine patch 0026. The device build (b14) is
+  unchanged and still has the tempo knob: it changes when a device build has the drums.
+
+## 2026-10-11 — What could ship: first figures for the drums and the four sounds on the device (desk work)
+
+Sean: "I'd like to start moving toward finding out what's actually feasible to ship in the firmware."
+Nothing here ran on the device. Sizes are MEASURED with the device's compiler (`tools/size_probe.sh`:
+the JieLi pi32v2 clang at the firmware's own flags on `fm1_drums.c` and `fm1_felucca.c`, sizes from the
+objects' symbol tables); processor shares are ESTIMATES from Felucca's own figures.
+
+- **What there is to spend** (VERIFIED earlier): flash, 15.7 KB spare in block 1 of the app slot at b14; RAM,
+  the large-buffer region is full (12 B) and the other holds the game's heap, 233 KB, which the browser build
+  has run in 200 KB (not measured: how much of it E1M1 really uses); processor, unknown: no frame rate has
+  been measured on the FM-1 yet.
+- **The drum machine as the prototype has it** (13 kits, all voices): code 12,990 B + constants 6,524 B =
+  19.5 KB of flash, 2.2 KB of RAM. Too big as it is. Where it goes: 5.7 KB is setting a voice up from a kit's
+  knobs (Felucca's `dv_setup` for all twelve voice kinds, inlined), 3.4 KB the voices themselves, 2.7 KB the
+  mix with the chain, 2.05 KB the sine table, 1.4 KB Felucca's model kits, 0.8 KB my kit table, 0.8 KB the
+  pitch table. A cut for the device: the CRUNCH kit only, the five voices its patterns use (kick, snare, hat,
+  cymbal, tom), their settings worked out at build time (no set-up code, no pitch table), the chain: about
+  9 KB of flash, 1.5 KB of RAM. ESTIMATE until it is built.
+- **Felucca's synth whole:** code 71 KB, constants 157 KB (126 KB of it the recorded instruments), RAM 315 KB.
+  Not a candidate; it was never meant to be.
+- **The four sounds, cut to fit:** as Felucca compiles them, `analog_render` 1.7 KB and `lofi_render` 0.9 KB;
+  one-note voices with glide about 1.3 KB (no chord allocation is needed: all four are one-note presets);
+  envelope, LFO and filter control about 1 KB with 1 KB of tables; distortion 0.3 KB; chorus, delay and reverb
+  0.9 KB; the limiter is the drums'; pitch and filter tables 1 KB; glue 1 KB. About 9 KB of flash, of which
+  PULSE LD's engine is 1.2 KB. ESTIMATE until it is built.
+- **So in flash:** the drums alone fit (about 9 of 15.7 KB), the sounds alone fit, both together come to about
+  18 KB: 2 to 3 KB over, by estimate. Room to find: PULSE LD's engine (1.2 KB), a quarter sine table (1 KB),
+  the tempo knob and what else the firmware can lose.
+- **In RAM** the effects are the cost: Felucca's delay line is 131 KB (1.49 s); an eighth at 110 beats a
+  minute needs 24 KB at 44.1 kHz, 12 KB at half that rate; the reverb 10 KB of combs plus its allpasses; the
+  chorus 4 KB. With voices and the drums about 30 KB, all of it out of the game's heap (13 % of it). Each
+  effect can be dropped on its own, so which of the three the sounds need is a question for Sean's ear.
+- **Processor** (Felucca's host counts, `tests/cpu_baseline.txt`, at its measured 1.7 % of the chip per 100
+  instructions a sample; ASSUMED to carry over): a RAVE voice about 2.5 %, SAW LEAD 1.9 %, ACID 2.0 %, PULSE LD
+  0.9 % (each with a share of the effects in it); three lines of RAVE with effects about 10 %; the drums 4.5 %
+  as Felucca's kit, about 6 % with the chain (the limiter divides once a sample). About 16 % together. Against
+  that, with both on the emulated chip has nothing left to play and need not run; what it costs now is not
+  measured. Only a build on the device with a load meter settles this.
+- **The path:** (1) on the Mac: the device-shaped cuts built into the browser prototype in place of whole
+  Felucca, compared by ear with the takes Sean liked, and linked into the real firmware for exact sizes, with
+  the heap's real use measured; (2) on the device: a test build with a frame-rate and audio-load readout, which
+  Sean installs; the recovery core compared as before every build; (3) what ships, and the controls for it.
+
+## 2026-10-11 — Build "b15": the drum machine and three of Felucca's sounds in the firmware (built and Mac-tested; NOT installed)
+
+Sean, after the first figures: PULSE LD need not come if its engine is the deal breaker, and "We can skip the step
+where you put it all in the browser, let's just focus on shipping it to the device so I can test it for real."
+
+- **What b15 is:** b14 plus `firmware/fm1_sound.c`, one compilation unit (so Felucca's tables are in flash once):
+  - `fm1_drums.c`: the CRUNCH kit only (Felucca's own kit as designed, DRV 70 on each voice, DIST 30 on the kit,
+    the whole mix through Felucca's master limiter with the music going in at twice its level), the eight beats,
+    crash and fills as before. **KNOB 4** picks the beat, off at the bottom; there is no tempo knob, no kits, no
+    loudness steps, no "song's own part".
+  - `fm1_synth.c`: Felucca's ANALOG SAW LEAD, ACID and RAVE on **PRESETS 1 to 3** (then the game's 128
+    instruments), each of the music's channels on a one-note line of its own (four lines), with the preset's
+    distortion, chorus, delay (an eighth of the beat) and room reverb, and Felucca's master limiter. PULSE LD is
+    left out (a second engine).
+  - **SAVE** toggles the engine's own frames-a-second count (rp2040-doom's `USE_FPS`, which was compiled in all
+    along): small yellow digits in the picture's top right corner. For this round's measurements.
+- **How it was made to fit.** Felucca's set-up code and most of its tables are not in the firmware:
+  `firmware/gen_sound.c` (run on the Mac by `tools/gen_sound.sh`) works out the kit's coefficients for the 14
+  ways the patterns strike a voice and the three sounds' values, into `firmware/fm1_sound_gen.h` (in the
+  repository; `firmware/test.sh` checks it is current). The synth is the path those presets take through
+  Felucca's voice.c, eng_analog.c and fx.c, copied and cut (no chords, LFO, glide, modulation matrix, other
+  waves). The drum voices are called one kind at a time, so the seven kinds the kit does not have are not linked.
+- **MEASURED with the device's compiler** (`tools/size_probe.sh`): code 8,376 B + constants 5,531 B = 13.9 KB of
+  flash; RAM 50,068 B (the delay line 32 KB, the reverb 12 KB, the chorus 4 KB, the rest 2 KB). The first
+  estimate was about 18 KB of flash.
+- **The firmware:** 285,308 B (b14: 270,792; +14.5 KB with the engine's hooks); block 1 has 1,176 B spare. Build
+  id `f68dd272`; `doom_code.fwsc` 610,086 B, SHA-256 `07dce07c6598a077b27e398da24d7c1369211964d3cf3b1e8e61695e23660635`;
+  source commit `85ef453`. 21 package runs pass (`sh firmware/test.sh`).
+- **RAM is not the problem it looked** (MEASURED, `web/measure_heap.js`, a new test hook on the engine's
+  `Z_FreeMemory`): E1M1 uses about 14 KB of the game's heap, at the start and through a minute of scripted play
+  (the level's data stays in flash). The synth's 50 KB comes out of the window, so the FM-1's heap is now
+  183,264 B (was 233 KB); the browser build's heap is set to 176 KB to stay under it, and every browser test
+  passes there with 166 KB free.
+- **VERIFIED on the Mac:**
+  - `firmware/tests/synth_test.c`: for each of the three sounds, 16 s of busy notes on three channels (lines that
+    overlap, repeat keys, hang until the channel is let go, loud and soft) give **the same samples** from the
+    firmware's synth and from Felucca's whole sound core (`firmware/fm1_felucca.c`, kept for this): 0 of
+    1,590,272 samples differ. So what ships is, to the bit, what Sean heard in the takes.
+  - the drum machine's eight beats over a tone at the music's level: louder than it, peak 17,300 to 18,000, never
+    flat at full scale; off, the game's sound passes untouched.
+  - in the browser build, which is now this one configuration (`web/build.sh`; the separate prototype build is
+    gone): `test_drums.js` (16 checks), `test_synth.js` (7), and the older `test_sound_knobs.js`,
+    `test_message_line.js`, `test_controls.js`, `test_filter.js`, `test_node.js`, `test_view.js`, the two that
+    knew the tempo knob and the old PRESETS numbers brought up to date.
+  - **the recovery core**: id `9d99b4e4d399022c`, the same as b10 to b14; `tools/core_diff.py` against the kept
+    copies: no instruction differs from b11 to b14, and from b7 (`installed_2ab6deb5`, the last build known to
+    have run on the device) the same two functions differ as since b9, the audio interrupt and the screen blit,
+    both in game mode only. `firmware/doom_dev.c` is untouched.
+  - no library calls in the new code on the device (64-bit multiplies and divides are the chip's own).
+- **NOT VERIFIED, and only the device can say:** the frame rate with it; whether the sound keeps up (the mixer
+  runs in the main loop: if a frame takes too long the sound ring runs dry and crackles); how it sounds through
+  the FM-1's speaker. ESTIMATE of the cost: about 16 % of the chip with a sound and a beat both on. Not yet
+  done: switching the emulated chip off while it has nothing to play (both on), which would give time back.
+- b15 also carries everything since b7 that has not run on the device either: the keyboard layout of b8, the
+  sound knobs and pages of b9 to b14, the large message line.
+- **The site** (local, this branch): `site/sync_firmware.py b15`; KNOB 4 and PRESETS say what they do now; SAVE's
+  count is left off the page on purpose (as SCL and GLO are). 36 site tests pass. Built to
+  `site/frontend/dist-b15`, served at http://localhost:5185 by the `fm1-site-b15` preview entry or
+  `npx --prefix site/frontend vite preview site/frontend --outDir dist-b15 --port 5185 --strictPort`.
+  VERIFIED in the in-app browser: the page says "b15 · firmware f68dd272 · source 85ef453".
+- DEAD END on the way: `memmove` in the new code pulled the C library's memcpy in beside Felucca's own
+  (a duplicate symbol at link); the firmware's libc is Felucca's small one, which has no memmove.
+- LESSON: the estimate for flash was 4 KB too high because it counted Felucca's functions as Felucca compiles
+  them, whole; cut to what three presets use, and with the set-up done at build time, they are far smaller.
+  Build the cut before arguing about the budget.
+
+## 2026-10-11 — b15 RUNS ON THE FM-1 (Sean's report); the frame rate dips with a Felucca sound, and why (measured on the Mac)
+
+- **VERIFIED on the device, by Sean's report:** he installed b15 and "that all works". That is the first run on
+  the FM-1 of everything since b7 as well: the keyboard layout, the sound knobs and pages, the large message
+  line, the drum machine and the three sounds. No frame-rate figures given.
+- His observation: "I do seem to notice a dip in framerate in the latest version", and "factor in the felucca
+  sounds [running] if that matters". It is what matters.
+- **MEASURED** (`web/measure_sound.js`, new; a test hook `fm1_web_cost` times the emulated chip, the synth and
+  the drum machine in the browser build; microseconds a second of sound on this Mac, E1M1 playing, so what
+  carries over to the FM-1 is how the parts compare):
+
+  | | chip | synth | drums and limiter | together |
+  |---|---|---|---|---|
+  | the game as it was, the song's opening | 1,430 | | | 1,430 |
+  | the game as it was, a busy stretch | 2,670 | | | 2,670 |
+  | SAW LEAD / ACID / RAVE, b15 | 3,000 | 1,400 / 1,550 / 1,960 | | 4,400 to 5,000 |
+  | a beat (double bass / rock) | 1,340 / 1,960 | | 1,420 / 1,140 | 3,000 to 3,100 |
+  | RAVE and double bass | 140 | 1,950 | 1,360 | 3,450 |
+
+  The mixer runs in the same loop that draws the frames, so sound work is frame time. With a Felucca sound and
+  no beat the sound work was about 1.85 times the game's own in the same stretch of the song; with a beat alone
+  about 1.1 times; with both about 1.3 times.
+- **Why the worst case is a sound without a beat:** the chip did not get cheaper when the melody left it. Its
+  cost follows how many of its nine voices are still sounding, and the song's drums alone keep all nine
+  ringing: the driver gives each note the voice that has been free longest, so with nothing else to play every
+  hit rings out in full. With a beat on, the chip's drums are silent and it is cheap; with both, it does nothing.
+- **Fixed in b16** (engine patch 0028): with a synth sound on, the chip's drums go round the three voices let
+  go last. MEASURED: in the song as written 29 % of the chip's notes are drum hits (586 of 2,006), so a hit's
+  tail was cut 9 x 0.29 = 2.6 hits later; three voices leave the drums as they were. The chip's cost with a
+  synth sound falls from 3,000 to about 2,100, the whole from 4,400..5,000 to 3,500..4,200: about 1.5 times
+  the game's own in place of 1.85. Not VERIFIED by ear.
+- DEAD END: not working out voices that have faded 60 dB (the emulator goes on to 96 dB). No measurable gain:
+  the tails that cost are the audible ones.
+- **Where the synth's own work goes** (native timing of `fm1_sound.c`, RAVE on three lines, 39.7 ns a mixer
+  frame): oscillators, filter and level about half; the distortion a quarter (one a line); the master limiter
+  12 %; chorus and delay 7 %; the reverb 6 %. SAW LEAD 31 ns (no distortion), ACID 40.5, the drum machine with
+  its limiter 27, RAVE with double bass 68. None of it can go without changing the sound, except that the
+  synth's limiter works on two channels that are the same (about 2 ns).
+- **b16:** firmware 285,340 B, build id `115d7a81`, 1,176 B spare, recovery core id `9d99b4e4d399022c` (the
+  same; two game-mode functions differ from b7 as before); `doom_code.fwsc` SHA-256
+  `39bba1ece560e6091f70879172bb11cd8e2e554cd5e9539c8e70b15cc7b7fd2a`; source commit `d42d78b`; 21 package
+  runs and the browser tests pass. Local installer page: `site/frontend/dist-b16`, port 5186 (`fm1-site-b16`).
+  NOT installed.
+- Still not known: what share of the FM-1's time the sound work is, which decides how far to go. Asked of Sean:
+  the frames a second (SAVE) with nothing on, a sound, a beat, both.

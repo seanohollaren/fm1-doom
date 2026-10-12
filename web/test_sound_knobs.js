@@ -1,5 +1,6 @@
 // Headless check, in the browser build with E1M1's music playing, of the knobs that play with the music itself:
-// PRESETS (instrument), ALGORITHM (FM depth), KNOB 3 (pitch) and KNOB 4 (tempo); of ENV, which turns the four
+// PRESETS (instrument, after the synth's three sounds: web/test_synth.js), ALGORITHM (FM depth), KNOB 3 (pitch),
+// and that KNOB 4 leaves the tempo alone (it picks the drum beat: web/test_drums.js); of ENV, which turns the four
 // knobs into attack, decay, sustain and release, and LFO, which turns KNOB 1 into the filter's wobble, and back;
 // and of EDIT, which puts all of it back.
 //   node web/test_sound_knobs.js
@@ -58,10 +59,10 @@ globalThis.Module = {
       const level = new Map(written.mod);                                   // each instrument's modulator level as written
 
       // ---- PRESETS: the instrument
-      const pick = [19, 80, 127].find(n => !written.inst.includes(n));
-      await turn(PRESETS, pick + 1); await sleep(2500);
+      const pick = [19, 80, 127].find(n => !written.inst.includes(n)), SOUNDS = 3;   // (the first clicks are the synth's sounds)
+      await turn(PRESETS, SOUNDS + pick + 1); await sleep(2500);
       const swapped = await voices(3000);
-      check(`PRESETS ${pick + 1} clicks up: every melodic voice plays instrument ${pick}`, swapped.inst.join() === String(pick), `GENMIDI ${swapped.inst.join(', ')}`);
+      check(`PRESETS ${SOUNDS + pick + 1} clicks up: every melodic voice plays instrument ${pick}`, swapped.inst.join() === String(pick), `GENMIDI ${swapped.inst.join(', ')}`);
       await turn(PRESETS, -127); await turn(PRESETS, -127); await sleep(2500);
       const unswapped = await voices(4000);
       for (const [i, l] of unswapped.mod) if (!level.has(i)) level.set(i, l);
@@ -78,15 +79,13 @@ globalThis.Module = {
       check('... far past the bottom: an octave lower, and no further', all(await voices(3000), own - 12));
       await turn(K3, 12);
 
-      // ---- KNOB 4: tempo
-      await turn(K4, 12); await sleep(500);
-      const fast = await ticksIn(4000);
-      check('KNOB 4 twelve clicks up: the music plays twice as fast', Math.abs(fast / pace - 2) < 0.12, `${fast.toFixed(0)} ticks a second against ${pace.toFixed(0)}`);
-      await turn(K4, -40); await sleep(800);
-      const slow = await ticksIn(5000);
-      check('... far past the bottom: half speed, and no slower', Math.abs(slow / pace - 0.5) < 0.05, `${slow.toFixed(0)} ticks a second`);
-      await turn(K4, 12); await sleep(500);
-      check('... twelve up again: as written', Math.abs((await ticksIn(4000)) / pace - 1) < 0.06);
+      // ---- KNOB 4: the drum beat (web/test_drums.js), and no longer the tempo
+      const beat0 = M._fm1_drums_hits();
+      await turn(K4, 1); await sleep(500);
+      const withBeat = await ticksIn(4000), struck = M._fm1_drums_hits() - beat0;
+      await turn(K4, -1); await sleep(1500);
+      const afterOff = M._fm1_drums_hits();
+      check('KNOB 4 a click up: a drum beat comes in, and the music keeps its tempo', struck > 20 && Math.abs(withBeat / pace - 1) < 0.06, `${struck} hits; ${withBeat.toFixed(0)} ticks a second against ${pace.toFixed(0)}`);
 
       // ---- ALGORITHM: FM depth
       const depth = (v, by) => v.mod.size > 0 && [...v.mod].every(([i, l]) => !level.has(i) || l === Math.max(0, Math.min(63, level.get(i) - by)));
@@ -146,16 +145,16 @@ globalThis.Module = {
         `between ${wob.lo.toFixed(1)} and ${wob.hi.toFixed(1)}`);
       await turn(K2, 3); await turn(K3, 3); await turn(K4, 3); await sleep(500);
       check('... and the other three knobs do nothing there', all(await voices(2000), own) && Math.abs((await ticksIn(3000)) / pace - 1) < 0.06);
+      const quiet = M._fm1_drums_hits();
       await tap(LFO);
-      await turn(K4, 12); await sleep(500);
-      const both = await ticksIn(3000);
-      check('LFO again: KNOB 4 is the tempo again (twice as fast)', Math.abs(both / pace - 2) < 0.12, `${both.toFixed(0)} ticks a second`);
-      await turn(K4, -12); await sleep(500);
+      await turn(K4, 1); await sleep(2500);
+      check('LFO again: KNOB 4 picks the drum beat again (and did not on the wobble\'s page)', M._fm1_drums_hits() - quiet > 10 && quiet === afterOff, `${M._fm1_drums_hits() - quiet} hits`);
+      await turn(K4, -1); await sleep(1500);
       const wobStill = await filterIn(2500);
       check('... and the wobble has gone on all the while', wobStill.hi - wobStill.lo > 14, `between ${wobStill.lo.toFixed(1)} and ${wobStill.hi.toFixed(1)}`);
 
       // ---- EDIT: everything as it was
-      await turn(PRESETS, 40); await turn(K3, 5); await turn(ALGORITHM, 3);
+      await turn(PRESETS, SOUNDS + 40); await turn(K3, 5); await turn(ALGORITHM, 3);
       await tap(ENV); await turn(K2, 2); await turn(K4, 6);                 // and left on the envelope's knobs
       await tap(EDIT); await sleep(3000);
       const back = await voices(5000), after = await listen(4000), paceBack = await ticksIn(3000);
@@ -163,10 +162,10 @@ globalThis.Module = {
       const off = await filterIn(1000);
       check('... tempo as written, filter and wobble off', Math.abs(paceBack / pace - 1) < 0.06 && Math.abs(20 * Math.log10(after.rms / before.rms)) < 4 && off.lo === 0 && off.hi === 0,
         `${paceBack.toFixed(0)} ticks a second; rms ${after.rms.toFixed(0)}; filter at ${off.lo}`);
-      await turn(K4, 12); await sleep(500);
-      const first = await ticksIn(3000);
-      check('... and the knobs have their first jobs again (KNOB 4: tempo)', Math.abs(first / pace - 2) < 0.12, `${first.toFixed(0)} ticks a second`);
-      await turn(K4, -12); await turn(SELECT, 1);
+      const idle = M._fm1_drums_hits();
+      await turn(K4, 1); await sleep(2500);
+      check('... and the knobs have their first jobs again (KNOB 4: the drum beat)', M._fm1_drums_hits() - idle > 10, `${M._fm1_drums_hits() - idle} hits`);
+      await turn(K4, -1); await turn(SELECT, 1);
       check('no audio underruns while listening', M._fm1_web_underruns() === under, `${M._fm1_web_underruns() - under}`);
       console.log(bad ? `SOUND KNOBS IN THE GAME: FAILED (${bad})` : 'SOUND KNOBS IN THE GAME: PASSED');
       process.exit(bad ? 1 : 0);

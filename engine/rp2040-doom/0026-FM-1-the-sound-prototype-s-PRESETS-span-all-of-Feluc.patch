@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean O'Hollaren <sean.ohollaren@gmail.com>
+Date: Sun, 11 Oct 2026 15:39:27 -0700
+Subject: [PATCH] FM-1: the sound prototype's PRESETS span all of Felucca's
+ presets; KNOB 4 picks the drum beat
+
+With FM1_FM6 the PRESETS knob's first clicks are as many presets as the
+synth beside the game says it has (66 with Felucca's whole synth, where
+the first prototype had its FM6 engine's eight).
+
+With FM1_DRUMS, KNOB 4 on the first page picks the drum machine's beat,
+off at the bottom, and there is no tempo knob. Nothing changes without
+those two.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/fm1/fm1_controls.c | 24 +++++++++++++++++-------
+ 1 file changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/src/fm1/fm1_controls.c b/src/fm1/fm1_controls.c
+index 2c50046..dabae8a 100644
+--- a/src/fm1/fm1_controls.c
++++ b/src/fm1/fm1_controls.c
+@@ -48,10 +48,13 @@ static const uint8_t FM1_TEMPO[2 * FM1_TEMPO_STEPS + 1] = {
+ };
+ static int8_t fm1_tempo;                                     /* -FM1_TEMPO_STEPS .. FM1_TEMPO_STEPS */
+ #if FM1_FM6
+-// Prototype: the PRESETS knob's first eight clicks are the factory patches of Felucca's six-operator engine
+-// (fm1-doom firmware/fm1_fm6.c), which then plays the melodic notes; the game's own 128 instruments follow.
+-#define FM1_FM6_PATCHES 8
++// Prototype: the PRESETS knob's first clicks are the factory presets of Felucca's synth, engine by engine
++// (fm1-doom firmware/fm1_felucca.c; 66 of them), which then plays the melodic notes with the chorus, delay and
++// reverb the preset sets; the game's own 128 instruments follow. (The names are the first prototype's, which
++// had Felucca's FM6 engine only.)
++#define FM1_FM6_PATCHES fm1_fm6_count()
+ extern volatile uint8_t fm1_fm6_on;
++int fm1_fm6_count(void);
+ const char *fm1_fm6_name(int n);
+ #else
+ #define FM1_FM6_PATCHES 0
+@@ -214,11 +217,12 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+     }
+     // the music's instrument: PRESETS, as written at the bottom (notes already sounding keep theirs)
+     if (enc[FM1_ENC_PRESET]) {
+-        int n = fm1_turn(fm1_preset, enc[FM1_ENC_PRESET], 0, FM1_FM6_PATCHES + FM1_MUSIC_INSTRS);
++        int felucca = FM1_FM6_PATCHES;
++        int n = fm1_turn(fm1_preset, enc[FM1_ENC_PRESET], 0, felucca + FM1_MUSIC_INSTRS);
+         fm1_preset = (uint8_t)n;
+-        fm1_music_instr = (uint8_t)(n > FM1_FM6_PATCHES ? n - FM1_FM6_PATCHES : 0);
++        fm1_music_instr = (uint8_t)(n > felucca ? n - felucca : 0);
+ #if FM1_FM6
+-        fm1_fm6_on = (uint8_t)(n <= FM1_FM6_PATCHES ? n : 0);
++        fm1_fm6_on = (uint8_t)(n <= felucca ? n : 0);
+         if (fm1_fm6_on) {
+             fm1_say("FELUCCA ", n, " ");
+             fm1_say_more(fm1_fm6_name(n));
+@@ -236,16 +240,22 @@ void fm1_controls_update(uint32_t notes, uint32_t buttons, const int8_t enc[FM1_
+         FM1_Reshape();
+         fm1_say_signed("FM DEPTH", fm1_music_depth);
+     }
+-    // KNOB 3 pitch, KNOB 4 tempo
++    // KNOB 3 pitch, KNOB 4 tempo (with the drum machine: the beat)
+     if (enc[FM1_ENC_K3] && fm1_page == FM1_PAGE_MAIN) {
+         fm1_music_pitch = (int8_t)fm1_turn(fm1_music_pitch, enc[FM1_ENC_K3], -FM1_PITCH_STEPS, FM1_PITCH_STEPS);
+         FM1_Retune();
+         fm1_say_signed("PITCH", fm1_music_pitch);
+     }
+     if (enc[FM1_ENC_K4] && fm1_page == FM1_PAGE_MAIN) {
++#if FM1_DRUMS
++        // (with the drum machine there is no tempo knob: KNOB 4 picks the beat, off at the bottom)
++        fm1_drums_pattern = (uint8_t)fm1_turn(fm1_drums_pattern, enc[FM1_ENC_K4], 0, fm1_drums_patterns());
++        fm1_say("DRUMS: ", -1, fm1_drums_pattern_name(fm1_drums_pattern));
++#else
+         fm1_tempo = (int8_t)fm1_turn(fm1_tempo, enc[FM1_ENC_K4], -FM1_TEMPO_STEPS, FM1_TEMPO_STEPS);
+         fm1_music_time = 6553600u / FM1_TEMPO[fm1_tempo + FM1_TEMPO_STEPS];
+         fm1_say("TEMPO ", FM1_TEMPO[fm1_tempo + FM1_TEMPO_STEPS], "%");
++#endif
+     }
+     // after ENV: the four knobs are attack, decay, sustain, release
+     for (unsigned i = 0; i < 4u && fm1_page == FM1_PAGE_ENV; i++) {

@@ -16,6 +16,9 @@ tiny.whd.h
 # build output
 /host-build/
 /web/build/
+/web/build-fm6/
+# recordings of the game for review: made from game data, never committed
+/web/samples/
 /firmware/build/
 /sizecheck/obj/
 /sizecheck/*.elf
@@ -39,6 +42,8 @@ node_modules/
 /site/frontend/dist-check/
 /site/frontend/dist-b6/
 /site/frontend/dist-b7/
+/site/frontend/dist-b15/
+/site/frontend/dist-b16/
 /site/infra/cdk.out/
 /site/infra/**/*.js
 /site/infra/**/*.d.ts
