@@ -2156,3 +2156,49 @@ where you put it all in the browser, let's just focus on shipping it to the devi
 - LESSON: the estimate for flash was 4 KB too high because it counted Felucca's functions as Felucca compiles
   them, whole; cut to what three presets use, and with the set-up done at build time, they are far smaller.
   Build the cut before arguing about the budget.
+
+## 2026-10-11 — b15 RUNS ON THE FM-1 (Sean's report); the frame rate dips with a Felucca sound, and why (measured on the Mac)
+
+- **VERIFIED on the device, by Sean's report:** he installed b15 and "that all works". That is the first run on
+  the FM-1 of everything since b7 as well: the keyboard layout, the sound knobs and pages, the large message
+  line, the drum machine and the three sounds. No frame-rate figures given.
+- His observation: "I do seem to notice a dip in framerate in the latest version", and "factor in the felucca
+  sounds [running] if that matters". It is what matters.
+- **MEASURED** (`web/measure_sound.js`, new; a test hook `fm1_web_cost` times the emulated chip, the synth and
+  the drum machine in the browser build; microseconds a second of sound on this Mac, E1M1 playing, so what
+  carries over to the FM-1 is how the parts compare):
+
+  | | chip | synth | drums and limiter | together |
+  |---|---|---|---|---|
+  | the game as it was, the song's opening | 1,430 | | | 1,430 |
+  | the game as it was, a busy stretch | 2,670 | | | 2,670 |
+  | SAW LEAD / ACID / RAVE, b15 | 3,000 | 1,400 / 1,550 / 1,960 | | 4,400 to 5,000 |
+  | a beat (double bass / rock) | 1,340 / 1,960 | | 1,420 / 1,140 | 3,000 to 3,100 |
+  | RAVE and double bass | 140 | 1,950 | 1,360 | 3,450 |
+
+  The mixer runs in the same loop that draws the frames, so sound work is frame time. With a Felucca sound and
+  no beat the sound work was about 1.85 times the game's own in the same stretch of the song; with a beat alone
+  about 1.1 times; with both about 1.3 times.
+- **Why the worst case is a sound without a beat:** the chip did not get cheaper when the melody left it. Its
+  cost follows how many of its nine voices are still sounding, and the song's drums alone keep all nine
+  ringing: the driver gives each note the voice that has been free longest, so with nothing else to play every
+  hit rings out in full. With a beat on, the chip's drums are silent and it is cheap; with both, it does nothing.
+- **Fixed in b16** (engine patch 0028): with a synth sound on, the chip's drums go round the three voices let
+  go last. MEASURED: in the song as written 29 % of the chip's notes are drum hits (586 of 2,006), so a hit's
+  tail was cut 9 x 0.29 = 2.6 hits later; three voices leave the drums as they were. The chip's cost with a
+  synth sound falls from 3,000 to about 2,100, the whole from 4,400..5,000 to 3,500..4,200: about 1.5 times
+  the game's own in place of 1.85. Not VERIFIED by ear.
+- DEAD END: not working out voices that have faded 60 dB (the emulator goes on to 96 dB). No measurable gain:
+  the tails that cost are the audible ones.
+- **Where the synth's own work goes** (native timing of `fm1_sound.c`, RAVE on three lines, 39.7 ns a mixer
+  frame): oscillators, filter and level about half; the distortion a quarter (one a line); the master limiter
+  12 %; chorus and delay 7 %; the reverb 6 %. SAW LEAD 31 ns (no distortion), ACID 40.5, the drum machine with
+  its limiter 27, RAVE with double bass 68. None of it can go without changing the sound, except that the
+  synth's limiter works on two channels that are the same (about 2 ns).
+- **b16:** firmware 285,340 B, build id `115d7a81`, 1,176 B spare, recovery core id `9d99b4e4d399022c` (the
+  same; two game-mode functions differ from b7 as before); `doom_code.fwsc` SHA-256
+  `39bba1ece560e6091f70879172bb11cd8e2e554cd5e9539c8e70b15cc7b7fd2a`; source commit `d42d78b`; 21 package
+  runs and the browser tests pass. Local installer page: `site/frontend/dist-b16`, port 5186 (`fm1-site-b16`).
+  NOT installed.
+- Still not known: what share of the FM-1's time the sound work is, which decides how far to go. Asked of Sean:
+  the frames a second (SAVE) with nothing on, a sound, a beat, both.
