@@ -78,6 +78,9 @@ export function Footer() {
             you ask, or uses your own.
           </p>
           <p>
+            The page counts visits and installs, with nothing that identifies you or your FM-1 and no cookies.
+          </p>
+          <p>
             DOOM is a trademark of id Software. This project is not affiliated with id Software, ZeniMax, M-VAVE or Hügelton Instruments.
           </p>
         </div>

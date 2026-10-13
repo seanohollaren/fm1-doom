@@ -24,7 +24,8 @@ away or go bad without harm: the visitor is told to use their own copy. Each mir
 | `capture_screen.js`, `frontend/src/assets/e1m1-start.png` | The picture on the drawn FM-1's screen: the panel two seconds after E1M1 appears, taken from the firmware's browser build (`sh web/build.sh`, then `node site/capture_screen.js`). A screenshot, and the only piece of id Software's artwork in the repository. |
 | `make_logo.py`, `art/` | The "FM-1" lettering (steel over gold brick, drawn from scratch by the script): the full logo (`art/fm1-logo.svg`) and the tab icon (`frontend/public/favicon.svg`). |
 | `security-headers.json` | The content security policy and permissions policy. CloudFront sends them; `npm run preview` sends the same. |
-| `infra/` | CDK: `DoomSiteCertStack` (us-east-1, for CloudFront) and `DoomSiteFrontendStack` (us-west-2: bucket, distribution, DNS). |
+| `infra/` | CDK: `DoomSiteCertStack` (us-east-1, for CloudFront), `DoomSiteFrontendStack` (us-west-2: bucket, distribution, DNS) and `DoomSiteTelemetryStack` (us-east-1: the install counter's log, metrics and dashboard). |
+| `install-count.json`, `infra/functions/count.js`, `frontend/src/lib/telemetry.ts` | The install counter (below): its names, the function that receives a count, and the page's side. |
 | `../.github/workflows/deploy.yml` | Test, build, `cdk deploy` on a push to `main` that touches `site/` or `web/`. |
 
 ## Working on it
@@ -45,6 +46,41 @@ npm run build && npm run preview   # the built site under its real security head
   without them (as in CI). `.npmrc` turns off npm's automatic peer installs: npm 10 cannot resolve vitest's
   optional peers from scratch.
 
+## The install counter
+
+How many visitors get through the installer. The page reports six events to its own site, `POST /count/<event>`:
+
+| Event | When | Metric |
+| --- | --- | --- |
+| `visit` | the page loaded | `PageVisits` |
+| `file` | the game file was fetched or chosen, and converted | `GameFileReady` |
+| `connect` | an FM-1 answered | `DeviceFound` |
+| `start` | Install was pressed | `InstallsStarted` |
+| `done` | the install finished and the game answered | `InstallsFinished` |
+| `fail` | the install stopped | `InstallsFailed` |
+
+With each go the build being installed (`fw=b16`), what the FM-1 said it ran when it was found (`had=FM-1_015`:
+the stock firmware; `FM-1_666` is Doom, so an update), the stage a failed install stopped at (`stage=1..4`: find,
+firmware, game data, start) and a random number made for this one load of the page (`sid`), which ties a visit's
+events together and is kept nowhere. No address, browser or cookie is recorded.
+
+`/count/*` never reaches the bucket: a CloudFront Function (`infra/functions/count.js`) writes one log line per
+event and answers 204. CloudFront keeps function logs in CloudWatch Logs in **us-east-1**
+(`/aws/cloudfront/function/doom-site-install-count`, kept 13 months), so that is where
+`DoomSiteTelemetryStack` puts the metric filters (namespace `DoomSite/Installer`) and the dashboard:
+
+https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/doom-site-installs
+
+- The numbers are a floor, and anyone can add to them: the endpoint is public, a content blocker may drop the
+  request, and a closed tab can lose the last event. `visit` to `done` on the "How far visits got" table counts
+  distinct loads of the page, so a retry is one visit there; the metrics count every event.
+- Only the built site counts. `npm run dev` (with or without `?demo`) and the tests send nothing and print
+  `count, not sent in development: /count/...` in the browser's console instead. `npm run preview` does send,
+  to its own server, which answers 404.
+- A new event needs its name in four places, and `src/lib/telemetry.test.ts` fails until they agree:
+  `install-count.json`, `functions/count.js`, `COUNT_EVENTS` in `telemetry.ts`, `METRICS` in
+  `infra/lib/telemetry-stack.ts`.
+
 ## Releasing a firmware build
 
 Only a build that has run on a real FM-1 goes on the site.
@@ -62,8 +98,8 @@ push.
 ## Deploying
 
 A merge to `main` that touches `site/` or `web/` deploys: `.github/workflows/deploy.yml` runs the tests, builds
-the frontend, runs `cdk deploy` for both stacks, then checks that the live page answers and serves exactly the
-committed firmware and converter. `ci.yml` runs the same checks (and a `cdk synth`) on every pull request.
+the frontend, runs `cdk deploy` for the three stacks, then checks that the live page answers, serves exactly the
+committed firmware and converter, and that the install counter's function is in place. `ci.yml` runs the same checks (and a `cdk synth`) on every pull request.
 Nobody deploys by hand.
 
 - **DNS.** `deadlockinteractive.com` already has its hosted zone (`Z07104152PEL021SX0LUQ`, in

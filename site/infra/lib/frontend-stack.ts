@@ -10,6 +10,8 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 // the same headers `vite preview` serves locally (site/frontend/vite.config.ts), so they can be tried before a deploy
 import securityHeaders from '../../security-headers.json';
+// the install counter's name and path, shared with the page and with the stack that reads its log
+import count from '../../install-count.json';
 
 export interface FrontendStackProps extends cdk.StackProps {
   certificate: acm.ICertificate;
@@ -40,12 +42,33 @@ export class FrontendStack extends cdk.Stack {
       },
     });
 
+    // The install counter: the page reports how far a visitor got, and this function writes one log line and
+    // answers by itself (functions/count.js). The lines are counted in us-east-1 (telemetry-stack.ts), where
+    // CloudFront keeps function logs.
+    const countFunction = new cloudfront.Function(this, 'InstallCount', {
+      functionName: count.functionName,
+      comment: 'Logs how far a visitor of the Doom installer got; answers 204',
+      code: cloudfront.FunctionCode.fromFile({ filePath: path.join(__dirname, '../functions/count.js') }),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+    });
+
+    const siteOrigin = origins.S3BucketOrigin.withOriginAccessControl(siteBucket);
     const distribution = new cloudfront.Distribution(this, 'Distribution', {
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(siteBucket),
+        origin: siteOrigin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         responseHeadersPolicy: headers,
         compress: true,
+      },
+      additionalBehaviors: {
+        // never reaches the bucket: the function answers every request under this path
+        [`${count.path}/*`]: {
+          origin: siteOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          functionAssociations: [{ function: countFunction, eventType: cloudfront.FunctionEventType.VIEWER_REQUEST }],
+        },
       },
       domainNames: [props.domainName],
       certificate: props.certificate,

@@ -1,0 +1,7 @@
+{
+  "functionName": "doom-site-install-count",
+  "path": "/count",
+  "marker": "FM1EVT_",
+  "events": ["visit", "file", "connect", "start", "done", "fail"],
+  "fields": ["fw", "had", "stage", "sid"]
+}

@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { CertificateStack } from '../lib/certificate-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { TelemetryStack } from '../lib/telemetry-stack';
 
 const app = new cdk.App();
 
@@ -17,12 +18,20 @@ const cert = new CertificateStack(app, 'DoomSiteCertStack', {
   hostedZoneName,
 });
 
-new FrontendStack(app, 'DoomSiteFrontendStack', {
+// The install counter's log, metrics and dashboard: us-east-1 too, because that is where CloudFront keeps the
+// logs of its functions.
+const telemetry = new TelemetryStack(app, 'DoomSiteTelemetryStack', {
+  env: { account, region: 'us-east-1' },
+});
+
+const frontend = new FrontendStack(app, 'DoomSiteFrontendStack', {
   env: { account, region: 'us-west-2' },
   crossRegionReferences: true,
   certificate: cert.certificate,
   domainName,
   hostedZoneName,
 });
+// the log group has to be there before the function first runs, or CloudFront makes one of the same name itself
+frontend.addDependency(telemetry);
 
 app.synth();

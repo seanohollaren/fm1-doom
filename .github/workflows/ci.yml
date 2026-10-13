@@ -63,7 +63,7 @@ jobs:
         working-directory: site/infra
         run: npm ci
 
-      # Synthesizes both stacks from the committed context (no AWS access needed): catches CDK errors before a deploy
+      # Synthesizes the stacks from the committed context (no AWS access needed): catches CDK errors before a deploy
       - name: 🏗️ CDK synth
         working-directory: site/infra
         run: npx tsc --noEmit && npx cdk synth --quiet
