@@ -90,7 +90,7 @@ jobs:
       # The frontend stack uploads site/frontend/dist and invalidates CloudFront itself
       - name: 🚀 Deploy with CDK
         working-directory: site/infra
-        run: npx cdk deploy DoomSiteCertStack DoomSiteFrontendStack --require-approval never
+        run: npx cdk deploy DoomSiteCertStack DoomSiteTelemetryStack DoomSiteFrontendStack --require-approval never
 
   smoke-tests:
     name: 🧪 Smoke tests
@@ -126,6 +126,15 @@ jobs:
           [ "$got" = "$want" ] || { echo "❌ converter: sha256 $got, expected $want"; exit 1; }
           curl -fsS -o /dev/null "$SITE_URL/whdgen/whd_gen_es.js"
           echo "✅ firmware and converter match"
+
+      # An event the counter does not know: its function answers 404 itself (the bucket would say 403), and
+      # nothing is counted. Says the function is in place; not that its lines reach the dashboard.
+      - name: 🧪 The install counter answers
+        run: |
+          path=$(jq -r .path site/install-count.json)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '' "$SITE_URL$path/smoke-test")
+          [ "$code" = "404" ] || { echo "❌ $path answered $code, expected the function's own 404"; exit 1; }
+          echo "✅ the install counter's function answers"
 
       - name: 📊 Deployment summary
         run: |

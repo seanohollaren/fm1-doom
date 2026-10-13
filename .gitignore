@@ -47,4 +47,6 @@ node_modules/
 /site/infra/cdk.out/
 /site/infra/**/*.js
 /site/infra/**/*.d.ts
+# (not compiler output: the CloudFront Function, written as JavaScript)
+!/site/infra/functions/*.js
 !/site/frontend/public/firmware/*.fwsc

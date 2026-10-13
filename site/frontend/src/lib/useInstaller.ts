@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { install, probe, selfCheck } from '@fm1/install.js'
 import { firmware, loadFirmware, prepareWad } from './prepare'
 import { fetchShareware, SHAREWARE_BYTES } from './shareware'
+import { count } from './telemetry'
 import { site } from '../site'
 import type { InstallEvent, Phase, Prepared, ProbeResult, StageState } from './types'
 
@@ -137,6 +138,7 @@ export function useInstaller() {
 
   useEffect(() => {
     let live = true
+    count('visit', {}, true)
     if (!selfCheck()) {
       dispatch({ type: 'baseError', message: "the page's self-check failed" })
       return
@@ -188,6 +190,7 @@ export function useInstaller() {
         const p = r.prepared
         dispatch({ type: 'log', text: `${p.fileName}: sha256 ${p.wadSha.slice(0, 16)}; game data ${p.dataBytes} B (sha256 ${p.dataSha.slice(0, 16)}), block 1 ${p.meta.split} B, block 2 ${p.meta.data2_len} B` })
         dispatch({ type: 'file', file: { status: 'ready', prepared: p } })
+        count('file', {}, true)
       } else {
         dispatch({ type: 'log', text: `${file.name}: ${r.message}${r.detail ? ` [${r.detail}]` : ''}` })
         dispatch({ type: 'file', file: { status: 'failed', name: file.name, message: r.message } })
@@ -232,7 +235,11 @@ export function useInstaller() {
     const result = (await probe(midi.current, prepared?.meta ?? null)) as ProbeResult
     dispatch({ type: 'log', text: result.kind === 'none' ? 'connect: no FM-1 answered' : `connect: ${result.id} on "${result.port}"` })
     dispatch({ type: 'connect', connect: { status: 'done', result } })
+    if (result.kind !== 'none') count('connect', { had: result.id }, true)
   }, [busy, prepared])
+
+  /** what the FM-1 said it runs when it was found, for the install counter (./telemetry) */
+  const had = state.connect.status === 'done' && state.connect.result.kind !== 'none' ? state.connect.result.id : undefined
 
   const run = useCallback(async () => {
     if (busy || !prepared) return
@@ -244,16 +251,22 @@ export function useInstaller() {
       return
     }
     dispatch({ type: 'runStart' })
+    count('start', { had })
+    let failedAt = 0
     const r = await install({
       midi: midi.current,
       image: prepared.image,
       data2: prepared.data2,
       meta: prepared.meta,
       force: testMode,
-      on: (ev: InstallEvent) => dispatch({ type: 'runEvent', ev }),
+      on: (ev: InstallEvent) => {
+        if (ev.t === 'stage' && ev.state === 'fail') failedAt = ev.n
+        dispatch({ type: 'runEvent', ev })
+      },
     })
     dispatch({ type: 'runEnd', ok: r.ok })
-  }, [busy, prepared])
+    count(r.ok ? 'done' : 'fail', r.ok ? { had } : { had, stage: failedAt })
+  }, [busy, prepared, had])
 
   // how far the visitor may go: each step opens the next
   const found = state.connect.status === 'done' && state.connect.result.kind !== 'none'

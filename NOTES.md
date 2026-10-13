@@ -2202,3 +2202,31 @@ where you put it all in the browser, let's just focus on shipping it to the devi
   NOT installed.
 - Still not known: what share of the FM-1's time the sound work is, which decides how far to go. Asked of Sean:
   the frames a second (SAVE) with nothing on, a sound, a beat, both.
+
+## 2026-10-13 — The site counts installs (branch `install-count`; built and tested on the Mac, NOT deployed)
+
+Sean asked for a way to see how many people get through the installer and finish flashing.
+
+- **What it is:** the page reports six events to its own site (`POST /count/<event>`: `visit`, `file`,
+  `connect`, `start`, `done`, `fail`), a CloudFront Function writes one log line for each and answers 204, and a
+  new stack in us-east-1 (`DoomSiteTelemetryStack`) turns the lines into CloudWatch metrics and a dashboard
+  (`doom-site-installs`). No Lambda, no new origin, nothing new in the content security policy (same site).
+  How it works, what is sent and where to look: `site/README.md`, "The install counter".
+- **Why us-east-1:** ASSUMED from AWS's documentation, not seen: CloudFront sends a function's `console.log`
+  lines to the log group `/aws/cloudfront/function/<name>` in us-east-1, each line with the request's id in
+  front. The stack makes that group itself (13 months' retention) and is deployed before the function, because
+  CloudFront would otherwise make one of the same name with no expiry and the stack could not then create its own.
+- **What a line holds:** the event, the build installed, what the FM-1 said it ran before, the stage a failed
+  install stopped at, and a random number for that one load of the page. No address, browser or cookie. The
+  footer says the page counts visits and installs.
+- VERIFIED on the Mac: `cdk synth` of the three stacks; the function file run against the URLs the page builds
+  (`src/lib/telemetry.test.ts`, 7 tests; 43 in all pass); the built page under its real security headers sends
+  `POST /count/visit?fw=b16&sid=…` once a load (the preview server answers 404); the development page against
+  the stand-in FM-1 prints, in order, `visit`, `file`, `connect had=FM-1_915`, `start`, and then
+  `fail stage=3` (with `?demo&stop=30`) or `done`.
+- NOT VERIFIED until it is deployed: that the function runs on CloudFront as written (it is plain ES5 for that
+  reason), that its lines reach the log group, and that the metric filters and the dashboard's queries match
+  them. After the first deploy: load the page once, then look for a `FM1EVT_visit` line in the log group and
+  a 1 on the dashboard.
+- Gotcha: `.gitignore` ignores every `.js` under `site/infra` (compiler output), so the function file needed an
+  exception; without it `cdk synth` fails in CI on a file that exists here.
